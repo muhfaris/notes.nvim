@@ -42,11 +42,14 @@ local function sanitize_title(title)
 	-- Trim hyphens from start and end
 	return sanitized:gsub("^-+", ""):gsub("-+$", "")
 end
+
 function M.new_note()
-	-- Create a full-screen buffer for the dimming effect
-	local dim_buf = api.nvim_create_buf(false, true)
+	-- Get the full screen dimensions
 	local width = vim.o.columns
 	local height = vim.o.lines
+
+	-- Create a full-screen buffer for the dimming effect
+	local dim_buf = api.nvim_create_buf(false, true)
 
 	-- Fill the buffer with spaces
 	local lines = {}
@@ -74,9 +77,42 @@ function M.new_note()
 	-- Set window options
 	vim.wo[dim_win].winblend = 30
 
-	-- Prompt for the note title
-	vim.ui.input({ prompt = "Enter title note: " }, function(input)
-		-- Close the dimming window
+	-- Create a centered floating window for input
+	local input_buf = api.nvim_create_buf(false, true)
+	local input_width = 40
+	local input_height = 1
+	local input_win = api.nvim_open_win(input_buf, true, {
+		relative = "editor",
+		width = input_width,
+		height = input_height,
+		row = math.floor((height - input_height) / 2),
+		col = math.floor((width - input_width) / 2),
+		style = "minimal",
+		border = "rounded",
+	})
+
+	-- Set up the prompt
+	api.nvim_buf_set_lines(input_buf, 0, -1, false, { "Enter title note:" })
+	api.nvim_set_option_value("winhl", "Normal:Normal", { win = input_win })
+
+	-- Set up autocommand to close windows on BufLeave
+	local group = api.nvim_create_augroup("CloseInputWindow", { clear = true })
+	api.nvim_create_autocmd("BufLeave", {
+		group = group,
+		buffer = input_buf,
+		callback = function()
+			api.nvim_win_close(input_win, true)
+			api.nvim_win_close(dim_win, true)
+		end,
+	})
+
+	-- Start insert mode at the end of the prompt
+	vim.cmd("startinsert!")
+	vim.cmd("normal! $")
+
+	vim.ui.input({ prompt = "" }, function(input)
+		-- Close the input and dimming windows
+		api.nvim_win_close(input_win, true)
 		api.nvim_win_close(dim_win, true)
 
 		-- Continue with the rest of your new_note function
@@ -88,17 +124,13 @@ function M.new_note()
 			local sanitized_title = sanitize_title(title)
 			local filename = string.format("%s_%s.md", sanitized_title, date)
 			local full_path = M.config.notes_dir .. "/" .. filename
-
 			vim.cmd("edit " .. full_path)
-
 			local template = M.config.template
 			template = template:gsub("%%TITLE%%", title)
 			template = template:gsub("%%DATE%%", date .. " " .. time)
 			template = template:gsub("%%LABEL%%", "")
 			template = template:gsub("%%BODY%%", "")
-
 			vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(template, "\n"))
-
 			local intro_line = vim.fn.search("^## Introduction")
 			if intro_line > 0 then
 				vim.api.nvim_win_set_cursor(0, { intro_line + 1, 0 })
@@ -108,6 +140,41 @@ function M.new_note()
 			print("Note creation cancelled.")
 		end
 	end)
+
+	-- Prompt for the note title
+	-- vim.ui.input({ prompt = "Enter title note: " }, function(input)
+	-- 	-- Close the dimming window
+	-- 	api.nvim_win_close(dim_win, true)
+	--
+	-- 	-- Continue with the rest of your new_note function
+	-- 	if input and input ~= "" then
+	-- 		-- Your existing code for creating a new note
+	-- 		local title = input
+	-- 		local date = os.date(M.config.date_format)
+	-- 		local time = os.date(M.config.time_format)
+	-- 		local sanitized_title = sanitize_title(title)
+	-- 		local filename = string.format("%s_%s.md", sanitized_title, date)
+	-- 		local full_path = M.config.notes_dir .. "/" .. filename
+	--
+	-- 		vim.cmd("edit " .. full_path)
+	--
+	-- 		local template = M.config.template
+	-- 		template = template:gsub("%%TITLE%%", title)
+	-- 		template = template:gsub("%%DATE%%", date .. " " .. time)
+	-- 		template = template:gsub("%%LABEL%%", "")
+	-- 		template = template:gsub("%%BODY%%", "")
+	--
+	-- 		vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(template, "\n"))
+	--
+	-- 		local intro_line = vim.fn.search("^## Introduction")
+	-- 		if intro_line > 0 then
+	-- 			vim.api.nvim_win_set_cursor(0, { intro_line + 1, 0 })
+	-- 		end
+	-- 		vim.cmd("startinsert")
+	-- 	else
+	-- 		print("Note creation cancelled.")
+	-- 	end
+	-- end)
 end
 
 -- Add this new function to delete a note
@@ -238,10 +305,22 @@ function M.list_notes()
 	})
 end
 
+function M.paste_image()
+	local image_dir = M.config.notes_dir + "/images"
+	if fn.isdirectory(image_dir) == 0 then
+		fn.mkdir(image_dir)
+	end
+
+	local image_path = image_dir + "/" + os.time() + ".png"
+	vim.fn.system("xclip -selection clipboard -t image/png -o > " + image_path)
+	vim.cmd("normal! i![](" .. image_path .. ")")
+end
+
 -- Set up commands
 vim.cmd([[
     command! NewNote lua require('notes').new_note()
     command! ListNotes lua require('notes').list_notes()
+    command! NotePasteImage lua require('notes').paste_image()
 ]])
 
 return M
