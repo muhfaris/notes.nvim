@@ -320,10 +320,85 @@ function M.paste_image()
 	vim.cmd("normal! i![](" .. image_path .. ")")
 end
 
+local pickers = require("telescope.pickers")
+local finders = require("telescope.finders")
+local conf = require("telescope.config").values
+local actions = require("telescope.actions")
+local action_state = require("telescope.actions.state")
+
+function M.list_notes_telescope()
+	local notes = vim.fn.globpath(M.config.notes_dir, "*.md", false, 1)
+	local notes_by_date = {}
+
+	local function get_note_title(file_path)
+		local file = io.open(file_path, "r")
+		if file then
+			for line in file:lines() do
+				local title = line:match("^# Title:%s*(.+)")
+				if title then
+					file:close()
+					return title
+				end
+			end
+			file:close()
+		end
+		return vim.fn.fnamemodify(file_path, ":t:r") -- fallback to filename without extension
+	end
+
+	for _, note in ipairs(notes) do
+		local date = vim.fn.fnamemodify(note, ":t"):match("_(%d+%-%d+%-%d+)")
+		if date then
+			if not notes_by_date[date] then
+				notes_by_date[date] = {}
+			end
+			local title = get_note_title(note)
+			table.insert(notes_by_date[date], { path = note, title = title })
+		end
+	end
+
+	local flatten_notes = {}
+	for date, date_notes in pairs(notes_by_date) do
+		table.insert(flatten_notes, { date, "Date", "" })
+		for _, note in ipairs(date_notes) do
+			table.insert(flatten_notes, { note.path, "Note", note.title })
+		end
+	end
+
+	pickers
+		.new({}, {
+			prompt_title = "Notes",
+			finder = finders.new_table({
+				results = flatten_notes,
+				entry_maker = function(entry)
+					return {
+						value = entry[1],
+						display = entry[3] ~= ""
+								and string.format("   %s", entry[3]) .. " (" .. vim.fn.fnamemodify(entry[1], ":t") .. ")"
+							or entry[1],
+						ordinal = entry[3] .. " " .. entry[1],
+						type = entry[2],
+					}
+				end,
+			}),
+			sorter = conf.generic_sorter({}),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selection = action_state.get_selected_entry()
+					if selection.type == "Note" then
+						vim.cmd("edit " .. selection.value)
+					end
+				end)
+				return true
+			end,
+		})
+		:find()
+end
+
 -- Set up commands
 vim.cmd([[
     command! NewNote lua require('notes').new_note()
-    command! ListNotes lua require('notes').list_notes()
+    command! ListNotes lua require('notes').list_notes_telescope()
     command! NotePasteImage lua require('notes').paste_image()
 ]])
 
