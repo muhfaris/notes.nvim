@@ -110,10 +110,14 @@ function M.new_note()
 	vim.cmd("startinsert!")
 	vim.cmd("normal! $")
 
-	vim.ui.input({ prompt = "" }, function(input)
-		-- Close the input and dimming windows
-		api.nvim_win_close(input_win, true)
-		api.nvim_win_close(dim_win, true)
+	vim.ui.input({ prompt = "Enter title note:" }, function(input)
+		-- Check if windows still exist before closing them
+		if vim.api.nvim_win_is_valid(input_win) then
+			vim.api.nvim_win_close(input_win, true)
+		end
+		if vim.api.nvim_win_is_valid(dim_win) then
+			vim.api.nvim_win_close(dim_win, true)
+		end
 
 		-- Continue with the rest of your new_note function
 		if input and input ~= "" then
@@ -306,13 +310,13 @@ function M.list_notes()
 end
 
 function M.paste_image()
-	local image_dir = M.config.notes_dir + "/images"
-	if fn.isdirectory(image_dir) == 0 then
-		fn.mkdir(image_dir)
+	local image_dir = M.config.notes_dir .. "/images"
+	if vim.fn.isdirectory(image_dir) == 0 then
+		vim.fn.mkdir(image_dir, "p")
 	end
 
-	local image_path = image_dir + "/" + os.time() + ".png"
-	vim.fn.system("xclip -selection clipboard -t image/png -o > " + image_path)
+	local image_path = image_dir .. "/" .. os.time() .. ".png"
+	vim.fn.system("xclip -selection clipboard -t image/png -o > " .. image_path)
 	vim.cmd("normal! i![](" .. image_path .. ")")
 end
 
