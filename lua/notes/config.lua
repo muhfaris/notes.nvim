@@ -34,10 +34,18 @@ M.config = {
 M.setup = function(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
 
+	if opts.notes_dir then
+		M.config.notes_dir = vim.fn.expand(opts.notes_dir)
+	end
+
 	-- Ensure the notes directory exists
 	if vim.fn.isdirectory(M.config.notes_dir) == 0 then
 		vim.fn.mkdir(M.config.notes_dir, "p")
 	end
+end
+
+M.get_config = function()
+	return M.config
 end
 
 return M

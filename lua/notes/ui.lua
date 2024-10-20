@@ -1,5 +1,5 @@
 local M = {}
-local config = require("notes.config").config
+local config = require("notes.config").get_config()
 local utils = require("notes.utils")
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
