@@ -4,6 +4,8 @@
 
 This plugin provides a set of functionalities for managing notes in markdown format within Neovim.
 
+[![asciicast](https://asciinema.org/a/bp4Ke8AyXlHLSe71JJJXKRmSN.svg)](https://asciinema.org/a/bp4Ke8AyXlHLSe71JJJXKRmSN)
+
 ### Features:
 
 - Create new notes with a pre-defined template including title, date, labels, summary, description, and conclusion.
