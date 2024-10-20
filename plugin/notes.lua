@@ -17,6 +17,10 @@ vim.api.nvim_create_user_command("ListNotes", function()
 	require("notes").list_notes()
 end, {})
 
+vim.api.nvim_create_user_command("FindNoteByKeyword", function()
+	require("notes").find_by_keyword()
+end, {})
+
 vim.api.nvim_create_user_command("NotePasteImage", function()
 	require("notes").paste_image()
 end, {})

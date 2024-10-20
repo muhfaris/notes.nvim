@@ -38,5 +38,6 @@ local utils = safe_require("notes.utils")
 M.new_note = ui.new_note
 M.list_notes = ui.list_notes
 M.paste_image = utils.paste_image
+M.find_by_keyword = ui.find_by_keyword
 
 return M

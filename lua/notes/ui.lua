@@ -223,4 +223,100 @@ M.list_notes = function()
 		:find()
 end
 
+-- Function to extract labels from a note
+M.get_keywords = function(note_path)
+	local labels = {}
+	local file = io.open(note_path, "r")
+	if file then
+		for line in file:lines() do
+			if line:match("^## Keywords: ") then
+				local label_line = line:gsub("^## Keywords: ", ""):gsub("%s+", "") -- Remove leading text and spaces
+				labels = vim.split(label_line, ",", { trimempty = true }) -- Split by comma
+				break
+			end
+		end
+		file:close()
+	end
+	return labels
+end
+
+-- Cache labels for all notes
+M.cache_keywords = function(notes_dir)
+	local label_cache = {}
+	local notes = vim.fn.globpath(notes_dir, "*.md", false, true) -- Get all note files in the directory
+	for _, note_path in ipairs(notes) do
+		--debug
+		local labels = M.get_keywords(note_path)
+		label_cache[note_path] = labels
+	end
+	return label_cache
+end
+
+-- Search notes by labels using Telescope
+M.find_by_keyword = function()
+	local label_cache = M.cache_keywords(config.notes_dir)
+
+	local all_labels = {}
+	for _, labels in pairs(label_cache) do
+		for _, label in ipairs(labels) do
+			if not vim.tbl_contains(all_labels, label) then
+				table.insert(all_labels, label) -- Collect unique labels
+			end
+		end
+	end
+
+	-- Use Telescope to fuzzy find labels
+	pickers
+		.new({}, {
+			prompt_title = "Search Notes by Label",
+			finder = finders.new_table({
+				results = all_labels,
+			}),
+			sorter = conf.generic_sorter(),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selected_label = action_state.get_selected_entry()[1]
+
+					-- Find all notes containing the selected label
+					local matching_notes = {}
+					for note, labels in pairs(label_cache) do
+						if vim.tbl_contains(labels, selected_label) then
+							table.insert(matching_notes, note)
+						end
+					end
+
+					-- Open another Telescope picker to select the note
+					pickers
+						.new({}, {
+							prompt_title = "Select Note with Label: " .. selected_label,
+							finder = finders.new_table({
+								results = matching_notes,
+							}),
+							sorter = conf.generic_sorter(),
+							attach_mappings = function(_, _)
+								actions.select_default:replace(function(prompt_bufnr)
+									local selection = action_state.get_selected_entry()
+									actions.close(prompt_bufnr)
+
+									-- Ensure that the selection is a note before opening
+									local note_path = selection.value
+
+									-- Open the selected note without causing the "Save changes" prompt
+									vim.cmd("edit " .. vim.fn.fnameescape(note_path))
+
+									-- Ensure the buffer is marked as unmodified right after opening
+									vim.cmd("set nomodified")
+								end)
+								return true
+							end,
+						})
+						:find()
+				end)
+				return true
+			end,
+		})
+		:find()
+end
+
 return M
