@@ -17,7 +17,9 @@ M.config = {
 
 ## Labels: %LABEL%
 
-## Introduction
+## Summary
+
+## Description
 
 %BODY%
 
@@ -330,19 +332,48 @@ function M.list_notes_telescope()
 	local notes = vim.fn.globpath(M.config.notes_dir, "*.md", false, 1)
 	local notes_by_date = {}
 
-	local function get_note_title(file_path)
+	local function get_note_info(file_path)
 		local file = io.open(file_path, "r")
+		local title, summary
+
 		if file then
-			for line in file:lines() do
-				local title = line:match("^# Title:%s*(.+)")
-				if title then
-					file:close()
-					return title
-				end
-			end
+			local content = file:read("*all")
 			file:close()
+
+			title = content:match("^# Title:%s*(.-)\n")
+			summary = content:match("## Summary\n(.-)\n##")
+
+			return title or vim.fn.fnamemodify(file_path, ":t:r"), summary or "No summary"
 		end
-		return vim.fn.fnamemodify(file_path, ":t:r") -- fallback to filename without extension
+	end
+
+	local function split_by_pipe(input_string)
+		return vim.split(input_string, "|", { trimempty = true })
+	end
+
+	local function delete_notex(prompt_bufnr)
+		local selection = action_state.get_selected_entry()
+		if selection.type ~= "Note" then
+			print("Cannot delete: not a note")
+			return
+		end
+
+		local note_path = selection.value
+		local filename = vim.fn.fnamemodify(note_path, ":t")
+		local confirm = vim.fn.input("Delete note '" .. filename .. "'? (y/N): ")
+		if confirm:lower() ~= "y" then
+			print("Deletion cancelled.")
+			return
+		end
+
+		local success, err = os.remove(note_path)
+		if success then
+			print("Note '" .. filename .. "' deleted successfully.")
+			actions.close(prompt_bufnr)
+			M.list_notes_telescope() -- Refresh the list
+		else
+			print("Error deleting note: " .. (err or "Unknown error"))
+		end
 	end
 
 	for _, note in ipairs(notes) do
@@ -351,16 +382,16 @@ function M.list_notes_telescope()
 			if not notes_by_date[date] then
 				notes_by_date[date] = {}
 			end
-			local title = get_note_title(note)
-			table.insert(notes_by_date[date], { path = note, title = title })
+			local title, summary = get_note_info(note)
+			table.insert(notes_by_date[date], { path = note, title = title, summary = summary })
 		end
 	end
 
 	local flatten_notes = {}
 	for date, date_notes in pairs(notes_by_date) do
-		table.insert(flatten_notes, { date, "Date", "" })
+		table.insert(flatten_notes, { date, "Date", "", "" })
 		for _, note in ipairs(date_notes) do
-			table.insert(flatten_notes, { note.path, "Note", note.title })
+			table.insert(flatten_notes, { note.path, "Note", note.title, note.summary })
 		end
 	end
 
@@ -372,11 +403,21 @@ function M.list_notes_telescope()
 				entry_maker = function(entry)
 					return {
 						value = entry[1],
-						display = entry[3] ~= ""
-								and string.format("   %s", entry[3]) .. " (" .. vim.fn.fnamemodify(entry[1], ":t") .. ")"
-							or entry[1],
+						display = function(entry)
+							if entry.type == "Date" then
+								return entry.value
+							else
+								-- local display_title = string.format("%-30s", entry.ordinal:sub(1, 30))
+								-- local display_title = string.format("%s", entry.ordinal)
+								local display_title = entry.title
+								local display_summary = entry.summary
+								return string.format(" %s  %s", display_title, display_summary or "No summary")
+							end
+						end,
 						ordinal = entry[3] .. " " .. entry[1],
 						type = entry[2],
+						title = entry[3],
+						summary = entry[4],
 					}
 				end,
 			}),
@@ -389,6 +430,15 @@ function M.list_notes_telescope()
 						vim.cmd("edit " .. selection.value)
 					end
 				end)
+
+				-- Add delete mapping
+				map("i", "<C-d>", function()
+					delete_notex(prompt_bufnr)
+				end)
+				map("n", "d", function()
+					delete_notex(prompt_bufnr)
+				end)
+
 				return true
 			end,
 		})
