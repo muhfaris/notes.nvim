@@ -14,6 +14,8 @@ This plugin provides a set of functionalities for managing notes in markdown for
 - Delete existing notes (with confirmation).
 - Configurable key mappings (no default keybindings provided).
 - Customizable note templates (with required `Title` and `Summary` sections).
+- Find notes using [Telescope](https://github.com/nvim-telescope/telescope.nvim)
+  fuzzy finder by keyword.
 
 ### Installation (Lazy Loading with `lazy.nvim`):
 
@@ -30,6 +32,7 @@ return {
           ["<leader>ac"] = "new_note",      -- Create a new note
           ["<leader>al"] = "list_notes",    -- List all notes
           ["<leader>api"] = "paste_image",  -- Paste an image into a note
+          ["<leader>afk"] = "find_by_keyword", -- Find notes by keyword
         },
       },
     }
@@ -63,6 +66,14 @@ Since the plugin does not come with default key mappings, you must define them i
   :ListNotes
   ```
 
+- **Find notes by keyword:**
+
+  Use your custom key mapping, e.g., `<leader>afk`:
+
+  ```
+  :FindNoteByKeyword
+  ```
+
 - **Open a listed note for editing:**
 
   Move the cursor to the desired note in the "Notes List" buffer and press `<CR>`.
@@ -80,7 +91,7 @@ When creating a new note, the following default template is used:
 
 ## Date: %DATE%
 
-## Labels: %LABEL%
+## Keywords: %Keywords%
 
 ## Summary
 
@@ -95,7 +106,7 @@ When creating a new note, the following default template is used:
 
 - `%TITLE%`: Replaced with the title of the note.
 - `%DATE%`: Replaced with the current date (formatted using `date_format`).
-- `%LABEL%`: Replaced with the labels/tags (optional).
+- `%Keywords%`: Replaced with the labels/tags (optional, example value: `tag1, tag2`).
 - `%BODY%`: Placeholder for the main content of the note.
 
 ### Customizing the Template:
