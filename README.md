@@ -153,3 +153,9 @@ This plugin requires the following dependencies, which will automatically be ins
 ### Disclaimer
 
 **Note:** This plugin is currently under development. More features and functionalities might be added in the future.
+
+## Support
+
+If you like this project and want to support its development, consider buying me a coffee:
+
+[![Support via PayPal](https://img.shields.io/badge/PayPal-Support%20Me-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/farisafif)
