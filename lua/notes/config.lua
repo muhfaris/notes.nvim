@@ -11,7 +11,7 @@ M.config = {
 
 ## Date: %DATE%
 
-## Labels: %LABEL%
+## Keywords: %Keywords%
 
 ## Summary
 
@@ -26,6 +26,7 @@ M.config = {
 		new_note = "Create new note",
 		list_notes = "List notes",
 		paste_image = "Paste image",
+		find_by_keyword = "Find notes by keyword",
 	},
 }
 
