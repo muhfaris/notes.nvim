@@ -148,7 +148,7 @@ M.list_notes = function()
 		if success then
 			print("Note '" .. filename .. "' deleted successfully.")
 			actions.close(prompt_bufnr)
-			M.list_notes_telescope() -- Refresh the list
+			M.list_notes() -- Refresh the list
 		else
 			print("Error deleting note: " .. (err or "Unknown error"))
 		end
