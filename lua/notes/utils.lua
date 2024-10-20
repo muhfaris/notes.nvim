@@ -1,5 +1,5 @@
 local M = {}
-local config = require("notes.config").config
+local config = require("notes.config").get_config()
 
 -- Function to sanitize the title for use in filename
 M.sanitize_title = function(title)

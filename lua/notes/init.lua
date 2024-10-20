@@ -1,4 +1,16 @@
 local M = {}
+
+local function safe_require(module)
+	local ok, result = pcall(require, module)
+	if not ok then
+		error(string.format("Failed to load %s: %s", module, result))
+	end
+	if type(result) ~= "table" then
+		error(string.format("Module %s did not return a table", module))
+	end
+	return result
+end
+
 M.setup = function(opts)
 	local config = require("notes.config")
 	config.setup(opts)
@@ -19,25 +31,14 @@ M.setup = function(opts)
 			end
 		end
 	end
+
+	local ui = safe_require("notes.ui")
+	local utils = safe_require("notes.utils")
+
+	M.new_note = ui.new_note
+	M.list_notes = ui.list_notes
+	M.paste_image = utils.paste_image
+	M.find_by_keyword = ui.find_by_keyword
 end
-
-local function safe_require(module)
-	local ok, result = pcall(require, module)
-	if not ok then
-		error(string.format("Failed to load %s: %s", module, result))
-	end
-	if type(result) ~= "table" then
-		error(string.format("Module %s did not return a table", module))
-	end
-	return result
-end
-
-local ui = safe_require("notes.ui")
-local utils = safe_require("notes.utils")
-
-M.new_note = ui.new_note
-M.list_notes = ui.list_notes
-M.paste_image = utils.paste_image
-M.find_by_keyword = ui.find_by_keyword
 
 return M
