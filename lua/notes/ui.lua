@@ -65,8 +65,12 @@ M.new_note = function()
 		group = group,
 		buffer = input_buf,
 		callback = function()
-			vim.api.nvim_win_close(input_win, true)
-			vim.api.nvim_win_close(dim_win, true)
+			if vim.api.nvim_win_is_valid(input_win) then
+				vim.api.nvim_win_close(input_win, true)
+			end
+			if vim.api.nvim_win_is_valid(dim_win) then
+				vim.api.nvim_win_close(dim_win, true)
+			end
 		end,
 	})
 
@@ -85,25 +89,39 @@ M.new_note = function()
 
 		-- Continue with the rest of your new_note function
 		if input and input ~= "" then
-			-- Your existing code for creating a new note
-			local title = input
-			local date = os.date(config.date_format)
-			local time = os.date(config.time_format)
-			local sanitized_title = utils.sanitize_title(title)
-			local filename = string.format("%s_%s.md", sanitized_title, date)
-			local full_path = config.notes_dir .. "/" .. filename
-			vim.cmd("edit " .. full_path)
-			local template = config.template
-			template = template:gsub("%%TITLE%%", title)
-			template = template:gsub("%%DATE%%", date .. " " .. time)
-			template = template:gsub("%%LABEL%%", "")
-			template = template:gsub("%%BODY%%", "")
-			vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(template, "\n"))
-			local intro_line = vim.fn.search("^## Introduction")
-			if intro_line > 0 then
-				vim.api.nvim_win_set_cursor(0, { intro_line + 1, 0 })
-			end
-			vim.cmd("startinsert")
+			vim.schedule(function()
+				-- Your existing code for creating a new note
+				local title = input
+				local date = os.date(config.date_format)
+				local time = os.date(config.time_format)
+				local sanitized_title = utils.sanitize_title(title)
+				local filename = string.format("%s_%s.md", sanitized_title, date)
+				local full_path = config.notes_dir .. "/" .. filename
+
+				-- Prepare template
+				local template = config.template
+				template = template:gsub("%%TITLE%%", title)
+				template = template:gsub("%%DATE%%", date .. " " .. time)
+				template = template:gsub("%%LABEL%%", "")
+				template = template:gsub("%%BODY%%", "")
+
+				-- Create and write initial content to the file
+				local file = io.open(vim.fn.fnameescape(full_path), "w") -- Open file in write mode
+				if not file then
+					print("Could not create file: " .. full_path)
+					return
+				end
+
+				-- Write the template
+				file:write(template)
+				file:close()
+				vim.cmd("edit " .. full_path)
+
+				local intro_line = vim.fn.search("^## Description")
+				if intro_line > 0 then
+					pcall(vim.api.nvim_win_set_cursor, 0, { intro_line + 1, 0 })
+				end
+			end)
 		else
 			print("Note creation cancelled.")
 		end
@@ -111,7 +129,7 @@ M.new_note = function()
 end
 
 M.list_notes = function()
-	local notes = vim.fn.globpath(config.notes_dir, "*.md", false, 1)
+	local notes = vim.fn.globpath(config.notes_dir, "*.md", false, true)
 	local notes_by_date = {}
 
 	local function get_note_info(file_path)
