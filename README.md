@@ -35,6 +35,8 @@ return {
           ["<leader>afk"] = "find_by_keyword", -- Find notes by keyword
         },
       },
+      length_title = 50,                    -- Maximum length of the title
+      length_summary = 90,                   -- Maximum length of the summary
     }
   end,
   dependencies = {
@@ -142,6 +144,8 @@ In this example, the `Summary` section is retained and required, while the `Desc
 - `time_format`: Format string for the time included in the template. (Default: "%H:%M:%S")
 - `template`: Markdown template used for creating new notes. Must include `Title` and `Summary` sections.
 - `keymaps`: Custom key mappings for the plugin commands.
+- `length_title`: Maximum length of the title.
+- `length_summary`: Maximum length of the summary.
 
 ### Dependencies:
 
