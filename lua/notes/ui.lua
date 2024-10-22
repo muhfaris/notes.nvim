@@ -7,6 +7,28 @@ local conf = require("telescope.config").values
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 
+-- Function to truncate text and add ellipsis
+local function truncate(text, width)
+	if #text > width then
+		return text:sub(1, width - 3) .. "..."
+	end
+	return text
+end
+
+local function format_display(entry)
+	if entry.type == "Date" then
+		return string.format(" %s", entry.value)
+	elseif entry.type == "Line" then
+		return "∟"
+	elseif entry.type == "Space" then
+		return ""
+	else
+		local display_title = truncate(entry.title, 60)
+		local display_summary = truncate(entry.summary or "No Summary", 140)
+		return string.format("   %-60s  %s", display_title, display_summary)
+	end
+end
+
 M.new_note = function()
 	-- Get the full screen dimensions
 	local width = vim.o.columns
@@ -197,19 +219,17 @@ M.list_notes = function()
 	end)
 
 	-- Flatten notes by sorted dates
-	for _, date in ipairs(sorted_dates) do
+	for index, date in ipairs(sorted_dates) do
+		if index ~= 1 then
+			table.insert(flatten_notes, { "", "Space", "", "" })
+		end
+
 		table.insert(flatten_notes, { date, "Date", "", "" })
+		table.insert(flatten_notes, { "", "Line", "", "" })
+
 		for _, note in ipairs(notes_by_date[date]) do
 			table.insert(flatten_notes, { note.path, "Note", note.title, note.summary })
 		end
-	end
-
-	-- Function to truncate text and add ellipsis
-	local function truncate(text, width)
-		if #text > width then
-			return text:sub(1, width - 3) .. "..."
-		end
-		return text
 	end
 
 	pickers
@@ -221,13 +241,7 @@ M.list_notes = function()
 					return {
 						value = entry[1],
 						display = function(entry)
-							if entry.type == "Date" then
-								return string.format("%s", entry.value)
-							else
-								local display_title = entry.title
-								local display_summary = truncate(entry.summary or "No Summary", 100)
-								return string.format(" %-50s  %s", display_title, display_summary or "No summary")
-							end
+							return format_display(entry)
 						end,
 						ordinal = entry[3] .. " " .. entry[1],
 						type = entry[2],
