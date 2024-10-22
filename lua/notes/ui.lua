@@ -184,11 +184,32 @@ M.list_notes = function()
 	end
 
 	local flatten_notes = {}
-	for date, date_notes in pairs(notes_by_date) do
+	local sorted_dates = {}
+
+	-- Collect dates for sorting
+	for date in pairs(notes_by_date) do
+		table.insert(sorted_dates, date)
+	end
+
+	-- Sort dates in descending order
+	table.sort(sorted_dates, function(a, b)
+		return a > b
+	end)
+
+	-- Flatten notes by sorted dates
+	for _, date in ipairs(sorted_dates) do
 		table.insert(flatten_notes, { date, "Date", "", "" })
-		for _, note in ipairs(date_notes) do
+		for _, note in ipairs(notes_by_date[date]) do
 			table.insert(flatten_notes, { note.path, "Note", note.title, note.summary })
 		end
+	end
+
+	-- Function to truncate text and add ellipsis
+	local function truncate(text, width)
+		if #text > width then
+			return text:sub(1, width - 3) .. "..."
+		end
+		return text
 	end
 
 	pickers
@@ -201,13 +222,11 @@ M.list_notes = function()
 						value = entry[1],
 						display = function(entry)
 							if entry.type == "Date" then
-								return entry.value
+								return string.format("%s", entry.value)
 							else
-								-- local display_title = string.format("%-30s", entry.ordinal:sub(1, 30))
-								-- local display_title = string.format("%s", entry.ordinal)
 								local display_title = entry.title
-								local display_summary = entry.summary
-								return string.format(" %s  %s", display_title, display_summary or "No summary")
+								local display_summary = truncate(entry.summary or "No Summary", 100)
+								return string.format(" %-50s  %s", display_title, display_summary or "No summary")
 							end
 						end,
 						ordinal = entry[3] .. " " .. entry[1],
