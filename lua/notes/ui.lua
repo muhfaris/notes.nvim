@@ -23,9 +23,9 @@ local function format_display(entry)
 	elseif entry.type == "Space" then
 		return ""
 	else
-		local display_title = truncate(entry.title, 60)
-		local display_summary = truncate(entry.summary or "No Summary", 140)
-		return string.format("   %-60s  %s", display_title, display_summary)
+		local display_title = truncate(entry.title, config.length_title)
+		local display_summary = truncate(entry.summary or "No Summary", config.length_summary)
+		return string.format("   %-" .. config.length_title .. "s  %s", display_title, display_summary)
 	end
 end
 

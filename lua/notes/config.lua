@@ -28,6 +28,8 @@ M.config = {
 		paste_image = "Paste image",
 		find_by_keyword = "Find notes by keyword",
 	},
+	length_summary = 140,
+	length_title = 60,
 }
 
 -- Function to set up the plugin
