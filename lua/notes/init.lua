@@ -23,8 +23,13 @@ M.setup = function(opts)
 				-- Fetch the description if available
 				local desc = config.config.key_desc[func_name] or "No description from notes.nvim"
 
-				if M[func_name] then
-					vim.keymap.set(mode, key, M[func_name], { noremap = true, silent = true, desc = desc })
+				if config.config.fn[func_name] then
+					vim.keymap.set(
+						mode,
+						key,
+						config.config.fn[func_name],
+						{ noremap = true, silent = true, desc = desc }
+					)
 				else
 					vim.notify("Function " .. func_name .. " not found in notes plugin", vim.log.levels.WARN)
 				end
