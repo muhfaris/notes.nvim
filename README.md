@@ -29,10 +29,10 @@ return {
       notes_dir = "/home/muhfaris/.notes",  -- Specify your notes directory
       keymaps = {                          -- Configure your custom key mappings
         n = {
-          ["<leader>ac"] = "new_note",      -- Create a new note
-          ["<leader>al"] = "list_notes",    -- List all notes
-          ["<leader>api"] = "paste_image",  -- Paste an image into a note
-          ["<leader>afk"] = "find_by_keyword", -- Find notes by keyword
+          ["<leader>nc"] = "new",      -- Create a new note
+          ["<leader>nl"] = "list",    -- List all notes
+          ["<leader>npi"] = "paste_image",  -- Paste an image into a note
+          ["<leader>nfk"] = "find_by_keyword", -- Find notes by keyword
         },
       },
       length_title = 50,                    -- Maximum length of the title
@@ -57,7 +57,7 @@ Since the plugin does not come with default key mappings, you must define them i
   Use your custom key mapping, e.g., `<leader>ac`:
 
   ```
-  :NewNote
+  :Notes new
   ```
 
 - **List existing notes:**
@@ -65,7 +65,7 @@ Since the plugin does not come with default key mappings, you must define them i
   Use your custom key mapping, e.g., `<leader>al`:
 
   ```
-  :ListNotes
+  :Notes list
   ```
 
 - **Find notes by keyword:**
@@ -73,7 +73,15 @@ Since the plugin does not come with default key mappings, you must define them i
   Use your custom key mapping, e.g., `<leader>afk`:
 
   ```
-  :FindNoteByKeyword
+  :Notes find_by_keyword
+  ```
+
+- **Paste an image into a note:**
+
+  Move the cursor to the desired note in the "Notes List" buffer and press `<Ctrl+p>` to paste an image into the note.
+
+  ```
+  :Notes paste_image
   ```
 
 - **Open a listed note for editing:**

@@ -30,6 +30,20 @@ M.config = {
 	},
 	length_summary = 140,
 	length_title = 60,
+	fn = {
+		new = function()
+			require("notes.ui").new_note()
+		end,
+		list = function()
+			require("notes.ui").list_notes()
+		end,
+		find_by_keyword = function()
+			require("notes.ui").find_by_keyword()
+		end,
+		paste_image = function()
+			require("notes.utils").paste_image()
+		end,
+	},
 }
 
 -- Function to set up the plugin
