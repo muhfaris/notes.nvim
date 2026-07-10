@@ -6,42 +6,141 @@ M.config = {
 	notes_dir = vim.fn.expand("~/.notes"),
 	date_format = "%Y-%m-%d",
 	time_format = "%H:%M:%S",
-	template = [[
-# Title: %TITLE%
+	editor_style = "current", -- "current" (default) or "float"
+	template = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: []
+summary: ""
+---
 
-## Date: %DATE%
-
-## Keywords: %Keywords%
-
-## Summary
+# %TITLE%
 
 ## Description
 
 %BODY%
-
-## Conclusion
 ]],
+	daily_template = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: ["daily"]
+summary: ""
+---
+
+# %TITLE%
+
+## Focus
+
+## Standup / Meetings
+
+## Tasks / Notes
+]],
+	templates = {
+		default = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: []
+summary: ""
+---
+
+# %TITLE%
+
+## Description
+
+%BODY%
+]],
+		rfc = [[---
+title: "RFC: %TITLE%"
+date: "%DATE%"
+tags: ["rfc"]
+summary: ""
+---
+
+# RFC: %TITLE%
+
+## Background
+
+## Proposal
+
+## Alternative Solutions
+]],
+		meeting = [[---
+title: "Meeting: %TITLE%"
+date: "%DATE%"
+tags: ["meeting"]
+summary: ""
+---
+
+# Meeting: %TITLE%
+
+## Attendees
+
+## Agenda
+
+## Action Items
+]],
+	},
 	keymaps = {},
 	key_desc = {
-		new_note = "Create new note",
-		list_notes = "List notes",
-		paste_image = "Paste image",
-		find_by_keyword = "Find notes by keyword",
+		new = "Notes: New",
+		daily = "Notes: Open Daily",
+		list = "Notes: List",
+		explorer = "Notes: Explorer",
+		search = "Notes: Search",
+		paste_image = "Notes: Paste Image",
+		migrate = "Notes: Migrate",
+		tags = "Notes: Browse Tags",
+		rename = "Notes: Rename",
+		delete = "Notes: Delete",
+		backlinks = "Notes: Backlinks",
+		tasks = "Notes: Tasks",
+		daily_prev = "Notes: Previous Daily",
+		daily_next = "Notes: Next Daily",
 	},
 	length_summary = 140,
 	length_title = 60,
 	fn = {
-		new = function()
-			require("notes.ui").new_note()
+		new = function(title)
+			require("notes.ui").new_note(title)
+		end,
+		daily = function()
+			require("notes.ui").daily_note()
 		end,
 		list = function()
 			require("notes.ui").list_notes()
 		end,
-		find_by_keyword = function()
-			require("notes.ui").find_by_keyword()
+		explorer = function()
+			require("notes.ui").toggle_explorer()
+		end,
+		search = function()
+			require("notes.ui").search_notes()
 		end,
 		paste_image = function()
 			require("notes.utils").paste_image()
+		end,
+		migrate = function()
+			require("notes.ui").migrate_notes()
+		end,
+		tags = function()
+			require("notes.ui").list_tags()
+		end,
+		rename = function()
+			require("notes.ui").rename_active_note()
+		end,
+		delete = function()
+			require("notes.ui").delete_active_note()
+		end,
+		backlinks = function()
+			require("notes.ui").list_backlinks()
+		end,
+		tasks = function()
+			require("notes.ui").list_tasks()
+		end,
+		daily_prev = function()
+			require("notes.ui").daily_prev()
+		end,
+		daily_next = function()
+			require("notes.ui").daily_next()
 		end,
 	},
 }

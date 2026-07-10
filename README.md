@@ -1,173 +1,139 @@
-## Notes Plugin for Neovim (Under Development)
+# notes.nvim - The Developer's Note-Taking Plugin for Neovim
+
+`notes.nvim` is a premium, developer-centric note-taking plugin for Neovim. It transforms your markdown notes into an interactive, visual personal wiki with support for YAML frontmatter metadata, a dedicated explorer sidebar dashboard, daily journals, inter-note wiki-link navigation, interactive task lists, and cross-platform clipboard image pasting.
 
 ---
 
-This plugin provides a set of functionalities for managing notes in markdown format within Neovim.
+## ✨ Features
 
-![note-demo](https://github.com/user-attachments/assets/62c4bfaa-5a9b-459a-ab5a-06bae2d8c1c8)
+- **📝 Zero-Friction Note Creation**: Centered, rounded floating title input that focuses automatically without disrupting your workspace layout.
+- **📅 Daily Journals**: Quick command (`:Notes daily`) to open or auto-generate today's journal entry.
+- **🗂️ Interactive Explorer Sidebar**: A visual dashboard (`notes://explorer`) grouping notes by Year and Month. Navigate, rename, delete, or create notes directly from the panel.
+- **🧮 Standard YAML Frontmatter**: Parses and writes frontmatter variables (`title`, `date`, `tags`, `summary`) automatically. Legacy note formats are read seamlessly via automatic fallback parsing.
+- **🔗 Inter-note Wiki-Links**: Press `<CR>` on any `[[Linked Note]]` or `[[2026-07-10]]` to jump to it instantly. If the linked note doesn't exist, the plugin prompts to create it.
+- **☑️ Task Checklists**: Easily toggle markdown checkbox items (`- [ ]` / `- [x]`) using `<leader>nt` (buffer-local, fully customizable).
+- **🖼️ Portable Clipboard Image Pasting**: Paste images directly from your clipboard across Linux (X11 & Wayland), macOS, and Windows. Saves files into `notes_dir/images/` and links them with portable relative paths (`images/image.png`).
+- **🔍 Telescope Integration**: Fuzzy find notes by title/tags/date via a clean column-based Telescope list (`:Notes list`), or live grep inside note content (`:Notes search`).
 
-### Features:
+---
 
-- Create new notes with a pre-defined template including title, date, labels, summary, description, and conclusion.
-- List existing notes grouped by creation date.
-- Open a selected note for editing.
-- Delete existing notes (with confirmation).
-- Configurable key mappings (no default keybindings provided).
-- Customizable note templates (with required `Title` and `Summary` sections).
-- Find notes using [Telescope](https://github.com/nvim-telescope/telescope.nvim)
-  fuzzy finder by keyword.
+## 📦 Installation
 
-### Installation (Lazy Loading with `lazy.nvim`):
+Install `notes.nvim` using your favorite package manager.
 
-To install the plugin using **lazy.nvim**, add the following to your `lazy` setup:
+### Lazy.nvim
 
 ```lua
 return {
   "muhfaris/notes.nvim",
+  dependencies = {
+    "nvim-telescope/telescope.nvim",       -- Fuzzy finder integration
+    "nvim-lua/plenary.nvim",               -- Required utility functions
+  },
   config = function()
     require("notes").setup {
-      notes_dir = "/home/muhfaris/.notes",  -- Specify your notes directory
-      keymaps = {                          -- Configure your custom key mappings
+      notes_dir = "~/.notes",              -- Directory where notes/images are stored
+      length_title = 60,                   -- Maximum title length (characters)
+      length_summary = 140,                -- Maximum summary length (characters)
+      editor_style = "current",            -- "current" (default) or "float"
+      keymaps = {
         n = {
-          ["<leader>nc"] = "new",      -- Create a new note
-          ["<leader>nl"] = "list",    -- List all notes
-          ["<leader>npi"] = "paste_image",  -- Paste an image into a note
-          ["<leader>nfk"] = "find_by_keyword", -- Find notes by keyword
+          ["<leader>nc"] = "new",          -- Create a new note
+          ["<leader>nd"] = "daily",        -- Open today's daily journal
+          ["<leader>nl"] = "list",         -- List notes using Telescope
+          ["<leader>ne"] = "explorer",     -- Toggle the sidebar explorer
+          ["<leader>ns"] = "search",       -- Live search note contents
+          ["<leader>np"] = "paste_image",  -- Paste clipboard image
         },
       },
-      length_title = 50,                    -- Maximum length of the title
-      length_summary = 90,                   -- Maximum length of the summary
     }
   end,
-  dependencies = {
-    "nvim-telescope/telescope.nvim",       -- Telescope integration for fuzzy finding notes
-    "nvim-lua/plenary.nvim",               -- Utility functions required by the plugin
-  },
 }
 ```
 
-### Usage:
+---
 
-Since the plugin does not come with default key mappings, you must define them in your setup as shown in the configuration above.
+## 🚀 Usage & Commands
 
-#### Example Key Mapping Usage:
+The plugin registers a unified `:Notes` user command with completion support:
 
-- **Create a new note:**
+| Command | Action |
+| :--- | :--- |
+| `:Notes new [title]` | Open floating popup to create a note. |
+| `:Notes daily` | Open or create today's journal entry. |
+| `:Notes explorer` | Toggle the visual explorer sidebar. |
+| `:Notes list` | List notes with Telescope formatted in columns. |
+| `:Notes search` | Search (live grep) note contents. |
+| `:Notes paste_image` | Paste clipboard image and insert relative markdown link. |
 
-  Use your custom key mapping, e.g., `<leader>ac`:
+---
 
-  ```
-  :Notes new
-  ```
+## 🗂️ Notes Explorer Sidebar
 
-- **List existing notes:**
+Toggle the sidebar with `:Notes explorer` or your bound key.
 
-  Use your custom key mapping, e.g., `<leader>al`:
+### Keymaps inside the Explorer buffer:
+* `<CR>` / `o`: Open the highlighted note.
+* `a`: Add a new file or directory (automatically detects: ends with `/` for directory, otherwise creates a file).
+* `d`: Delete the highlighted note (requires confirmation).
+* `r`: Rename the note title (automatically updates filename and YAML frontmatter title metadata).
+* `m`: Move the highlighted note to a new destination path (updates active buffer if open).
+* `c`: Copy the highlighted note path to the clipboard register.
+* `p`: Paste the copied note from the clipboard register into the current directory context.
+* `n`: Prompt to create a new note (opens template picker).
+* `s`: Search inside note contents globally.
+* `q`: Close the explorer sidebar.
+* `?`: Show the help popup displaying all available keymaps.
 
-  ```
-  :Notes list
-  ```
+---
 
-- **Find notes by keyword:**
+## ✍️ Markdown Buffer-local Keymaps
 
-  Use your custom key mapping, e.g., `<leader>afk`:
+When editing markdown files in your `notes_dir`, the plugin automatically activates buffer-local keymaps for fluid editing:
 
-  ```
-  :Notes find_by_keyword
-  ```
+* **Wiki-link Jump (`<CR>`)**: Press `<CR>` while cursor is on `[[Link]]` to navigate to that note.
+* **Task Toggle (`<leader>nt`)**: Toggle checklist state on the current line between `- [ ]` and `- [x]`.
 
-- **Paste an image into a note:**
+---
 
-  Move the cursor to the desired note in the "Notes List" buffer and press `<Ctrl+p>` to paste an image into the note.
+## 📄 Configuration Options
 
-  ```
-  :Notes paste_image
-  ```
+```lua
+require("notes").setup({
+  notes_dir = vim.fn.expand("~/.notes"),   -- Notes workspace directory
+  date_format = "%Y-%m-%d",                -- Date format used in templates
+  time_format = "%H:%M:%S",                -- Time format used in templates
+  length_title = 60,                       -- Char limit for note titles
+  length_summary = 140,                    -- Char limit for summary frontmatter field
+  editor_style = "current",                -- "current" (default) to edit in place, or "float" for floating popup/modal
+  
+  -- Default Markdown template
+  template = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: []
+summary: ""
+---
 
-- **Open a listed note for editing:**
-
-  Move the cursor to the desired note in the "Notes List" buffer and press `<CR>`.
-
-- **Delete a listed note:**
-
-  Select the note you want to delete and press `<Ctrl+d>` to confirm.
-
-### Default Note Template:
-
-When creating a new note, the following default template is used:
-
-```markdown
-# Title: %TITLE%
-
-## Date: %DATE%
-
-## Keywords: %Keywords%
-
-## Summary
+# %TITLE%
 
 ## Description
 
 %BODY%
+]],
 
-## Conclusion
-```
-
-#### Explanation of placeholders:
-
-- `%TITLE%`: Replaced with the title of the note.
-- `%DATE%`: Replaced with the current date (formatted using `date_format`).
-- `%Keywords%`: Replaced with the labels/tags (optional, example value: `tag1, tag2`).
-- `%BODY%`: Placeholder for the main content of the note.
-
-### Customizing the Template:
-
-You can customize the note template by providing your own template configuration. However, **the `Title` and `Summary` sections are required** and must be included in any custom template. This ensures that key metadata is always captured in the notes.
-
-#### Example of Custom Template:
-
-```lua
-require('notes').setup({
-  notes_dir = "/path/to/your/notes/directory",
-  template = [[
-  # Title: %TITLE%
-
-  ## Date: %DATE%
-
-  ## Summary
-
-  %BODY%
-
-  ## Additional Info
-
-  ]],
+  -- Bind your user commands to custom keys
+  keymaps = {
+    n = {
+      ["<leader>nc"] = "new",
+      ["<leader>nd"] = "daily",
+      ["<leader>nl"] = "list",
+      ["<leader>ne"] = "explorer",
+      ["<leader>ns"] = "search",
+      ["<leader>np"] = "paste_image",
+    }
+  }
 })
 ```
 
-In this example, the `Summary` section is retained and required, while the `Description` and `Labels` sections are removed.
-
-#### Configuration Options:
-
-- `notes_dir`: Path to the directory where notes will be stored. (Default: `~/.notes`)
-- `date_format`: Format string for the date included in the template. (Default: "%Y-%m-%d")
-- `time_format`: Format string for the time included in the template. (Default: "%H:%M:%S")
-- `template`: Markdown template used for creating new notes. Must include `Title` and `Summary` sections.
-- `keymaps`: Custom key mappings for the plugin commands.
-- `length_title`: Maximum length of the title.
-- `length_summary`: Maximum length of the summary.
-
-### Dependencies:
-
-This plugin requires the following dependencies, which will automatically be installed when using **lazy.nvim**:
-
-- **[Telescope.nvim](https://github.com/nvim-telescope/telescope.nvim)**: Used for fuzzy finding notes.
-- **[Plenary.nvim](https://github.com/nvim-lua/plenary.nvim)**: Utility functions that power various parts of the plugin.
-
-### Disclaimer
-
-**Note:** This plugin is currently under development. More features and functionalities might be added in the future.
-
-## Support
-
-If you like this project and want to support its development, consider buying me a coffee:
-
-[![Support via PayPal](https://img.shields.io/badge/PayPal-Support%20Me-blue.svg?logo=paypal)](https://www.paypal.com/paypalme/farisafif)
+---
