@@ -61,7 +61,7 @@ local function open_note_buffer(filepath, target_line)
 			title_pos = "center",
 		}
 		if vim.fn.has("nvim-0.9") == 1 then
-			win_opts.footer = " Press 'q' to save & close "
+			win_opts.footer = " q: close | <C-g>e: edit | <C-g>t: tab "
 			win_opts.footer_pos = "center"
 		end
 
@@ -76,6 +76,23 @@ local function open_note_buffer(filepath, target_line)
 
 		-- Buffer-local shortcut 'q' to save and close the float modal
 		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Float" })
+
+		-- Move to tab
+		vim.keymap.set("n", "<C-g>t", function()
+			vim.cmd("write")
+			vim.cmd("close")
+			vim.cmd("tabnew")
+			vim.api.nvim_win_set_buf(0, buf)
+			vim.keymap.set("n", "q", "<cmd>w<CR><cmd>tabclose<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Tab" })
+		end, { buffer = buf, silent = true, desc = "Move Note from Float to Tab" })
+
+		-- Move to editor (normal buffer)
+		vim.keymap.set("n", "<C-g>e", function()
+			vim.cmd("write")
+			vim.cmd("close")
+			vim.api.nvim_win_set_buf(0, buf)
+			pcall(vim.keymap.del, "n", "q", { buffer = buf })
+		end, { buffer = buf, silent = true, desc = "Move Note from Float to Editor" })
 	elseif config.editor_style == "tab" then
 		vim.cmd("tabnew")
 		vim.api.nvim_win_set_buf(0, buf)
