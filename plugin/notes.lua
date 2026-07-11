@@ -27,12 +27,17 @@ vim.api.nvim_create_user_command("Notes", function(opts)
 		end
 	end
 
+	-- Handle notion sync
+	if subcmd == "notion" and opts.fargs[2] == "sync" then
+		subcmd = "notion_sync"
+	end
+
 	local fn = config.config.fn[subcmd]
 	if fn then
 		-- Pass remaining fargs as arguments to the function (e.g. title)
 		local args = {}
 		local start_idx = 2
-		if subcmd == "daily_prev" or subcmd == "daily_next" then
+		if subcmd == "daily_prev" or subcmd == "daily_next" or subcmd == "notion_sync" then
 			start_idx = 3
 		end
 		for i = start_idx, #opts.fargs do
@@ -40,7 +45,7 @@ vim.api.nvim_create_user_command("Notes", function(opts)
 		end
 		fn(table.concat(args, " "))
 	else
-		vim.api.nvim_err_writeln("Invalid notes subcommand. Available commands: new, daily, list, explorer, search, paste_image, migrate, tags, rename, delete, backlinks, tasks")
+		vim.api.nvim_err_writeln("Invalid notes subcommand. Available commands: new, daily, list, explorer, search, paste_image, migrate, tags, rename, delete, backlinks, tasks, notion")
 	end
 end, {
 	nargs = "+",
@@ -66,7 +71,21 @@ end, {
 			end, daily_sub)
 		end
 
-		local subcommands = { "new", "daily", "list", "explorer", "search", "paste_image", "migrate", "tags", "rename", "delete", "backlinks", "tasks" }
+		local is_notion_subcmd = false
+		if #parts >= 2 and parts[2] == "notion" then
+			if #parts == 3 or (#parts == 2 and CmdLine:match("%s+$")) then
+				is_notion_subcmd = true
+			end
+		end
+
+		if is_notion_subcmd then
+			local notion_sub = { "sync" }
+			return vim.tbl_filter(function(cmd)
+				return cmd:match("^" .. ArgLead)
+			end, notion_sub)
+		end
+
+		local subcommands = { "new", "daily", "list", "explorer", "search", "paste_image", "migrate", "tags", "rename", "delete", "backlinks", "tasks", "notion" }
 		return vim.tbl_filter(function(cmd)
 			return cmd:match("^" .. ArgLead)
 		end, subcommands)

@@ -132,6 +132,13 @@ end
 -- Format frontmatter as a YAML string
 M.format_frontmatter = function(metadata)
 	local lines = { "---" }
+	local standard = {
+		title = true,
+		date = true,
+		tags = true,
+		summary = true,
+	}
+
 	table.insert(lines, string.format('title: "%s"', (metadata.title or ""):gsub('"', '\\"')))
 	table.insert(lines, string.format('date: "%s"', metadata.date or ""))
 
@@ -145,6 +152,23 @@ M.format_frontmatter = function(metadata)
 	end
 	table.insert(lines, string.format("tags: %s", tags_str))
 	table.insert(lines, string.format('summary: "%s"', (metadata.summary or ""):gsub('"', '\\"')))
+
+	-- Write any custom fields (like notion_page_id, notion_database_id, etc.)
+	local keys = {}
+	for k, _ in pairs(metadata) do
+		if not standard[k] then
+			table.insert(keys, k)
+		end
+	end
+	table.sort(keys)
+
+	for _, k in ipairs(keys) do
+		local v = metadata[k]
+		if type(v) ~= "table" and v ~= nil and v ~= "" then
+			table.insert(lines, string.format('%s: "%s"', k, tostring(v):gsub('"', '\\"')))
+		end
+	end
+
 	table.insert(lines, "---")
 
 	return table.concat(lines, "\n")

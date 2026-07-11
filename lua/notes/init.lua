@@ -65,6 +65,9 @@ M.setup = function(opts)
 	M.search_notes = ui.search_notes
 	M.paste_image = utils.paste_image
 	M.follow_wiki_link = ui.follow_wiki_link
+	M.notion_sync = function()
+		require("notes.notion.sync").sync_active_note()
+	end
 
 	-- Set up global keymaps if provided in setup options
 	if config.config and config.config.keymaps then
@@ -111,6 +114,17 @@ M.setup = function(opts)
 			vim.keymap.set("n", "<leader>nt", function()
 				require("notes.tasks").toggle_task()
 			end, { buffer = ev.buf, desc = "Toggle Markdown Task", silent = true })
+		end,
+	})
+
+	vim.api.nvim_create_autocmd("BufWritePost", {
+		group = group,
+		pattern = { pattern_root, pattern_nested },
+		callback = function(ev)
+			local notion_opts = config.config.notion
+			if notion_opts and notion_opts.enabled and notion_opts.sync_on_save then
+				require("notes.notion.sync").sync_active_note_debounced(ev.buf)
+			end
 		end,
 	})
 end
