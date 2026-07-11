@@ -6,7 +6,7 @@ M.config = {
 	notes_dir = vim.fn.expand("~/.notes"),
 	date_format = "%Y-%m-%d",
 	time_format = "%H:%M:%S",
-	editor_style = "current", -- "current" (default) or "float"
+	editor_style = "current", -- "current" (default), "float", "tab", "split", or "vsplit"
 	template = [[---
 title: "%TITLE%"
 date: "%DATE%"
@@ -96,9 +96,26 @@ summary: ""
 		tasks = "Notes: Tasks",
 		daily_prev = "Notes: Previous Daily",
 		daily_next = "Notes: Next Daily",
+		notion_sync = "Notes: Notion Sync",
 	},
 	length_summary = 140,
 	length_title = 60,
+	notion = {
+		enabled = false,
+		token = nil,
+		sync_on_save = true,
+		directory_mappings = {},
+		tag_mappings = {},
+		default_database = {
+			database_id = nil,
+			properties = {
+				title = "Name",
+				tags = "Tags",
+				date = "Date",
+				summary = "Summary",
+			},
+		},
+	},
 	fn = {
 		new = function(title)
 			require("notes.ui").new_note(title)
@@ -141,6 +158,9 @@ summary: ""
 		end,
 		daily_next = function()
 			require("notes.ui").daily_next()
+		end,
+		notion_sync = function()
+			require("notes.notion.sync").sync_active_note()
 		end,
 	},
 }

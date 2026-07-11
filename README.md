@@ -35,7 +35,7 @@ return {
       notes_dir = "~/.notes",              -- Directory where notes/images are stored
       length_title = 60,                   -- Maximum title length (characters)
       length_summary = 140,                -- Maximum summary length (characters)
-      editor_style = "current",            -- "current" (default) or "float"
+      editor_style = "current",            -- "current" (default), "float", "tab", "split", or "vsplit"
       keymaps = {
         n = {
           ["<leader>nc"] = "new",          -- Create a new note
@@ -105,7 +105,7 @@ require("notes").setup({
   time_format = "%H:%M:%S",                -- Time format used in templates
   length_title = 60,                       -- Char limit for note titles
   length_summary = 140,                    -- Char limit for summary frontmatter field
-  editor_style = "current",                -- "current" (default) to edit in place, or "float" for floating popup/modal
+  editor_style = "current",                -- "current" (default), "float" (floating popup), "tab" (new tab page), "split" (horizontal split), or "vsplit" (vertical split)
   
   -- Default Markdown template
   template = [[---
@@ -137,3 +137,91 @@ summary: ""
 ```
 
 ---
+
+## 🔄 Notion Integration (Optional)
+
+`notes.nvim` features an optional, non-blocking asynchronous Notion synchronization engine. When enabled, your local markdown notes are translated into Notion blocks and synced to target databases based on customizable folder-mapping, tag-routing, or a fallback default database.
+
+Syncing is triggered automatically on file save (debounced for performance) or manually via user command. Because the engine runs asynchronously in background processes using Neovim's `vim.system` and `curl`, Neovim will never freeze or hang during sync operations.
+
+### Configuration
+
+Add the `notion` configuration block to your `setup` options:
+
+```lua
+require("notes").setup {
+  notes_dir = "~/.notes",
+  
+  -- Optional Notion Configuration
+  notion = {
+    enabled = true,
+    -- Notion Integration Token:
+    -- 1. Plain string: "secret_your_notion_token"
+    -- 2. Environment variable: os.getenv("NOTION_TOKEN")
+    -- 3. Dynamic function (e.g. password manager 'pass'):
+    token = function()
+      return vim.fn.system("pass show notion/token"):gsub("%s+", "")
+    end,
+    sync_on_save = true,                             -- Debounced sync on BufWritePost
+    
+    -- Rule 1: Map specific folders to target Notion databases
+    directory_mappings = {
+      ["/rfc/"] = {
+        database_id = "your_notion_rfc_database_id",
+        properties = {
+          title = "RFC Title",                       -- Notion column names
+          tags = "Tags",
+          date = "Date Created",
+          summary = "Abstract",
+        }
+      },
+      ["/meetings/"] = {
+        database_id = "your_notion_meetings_database_id",
+        properties = {
+          title = "Meeting Name",
+          date = "Date",
+        }
+      }
+    },
+    
+    -- Rule 2: Map tags to target Notion databases
+    tag_mappings = {
+      ["daily"] = {
+        database_id = "your_notion_journal_database_id",
+        properties = {
+          title = "Name",
+          tags = "Journal Tags",
+        }
+      }
+    },
+
+    -- Fallback default database mapping
+    default_database = {
+      database_id = "your_notion_general_database_id",
+      properties = {
+        title = "Name",
+        tags = "Tags",
+        date = "Date",
+        summary = "Summary",
+      }
+    }
+  }
+}
+```
+
+### Commands
+
+| Command | Action |
+| :--- | :--- |
+| `:Notes notion sync` | Manually trigger immediate synchronization of the active note. |
+
+### How It Works
+
+1. **Routing Resolution**: When a sync is triggered, the engine resolves which database to target in the following order:
+   - Check if `notion_database_id` is set directly in the note's YAML frontmatter.
+   - Check if the note's file path matches any key in `directory_mappings`.
+   - Check if any tag in the note's YAML frontmatter matches a key in `tag_mappings`.
+   - Fall back to the configured `default_database`.
+2. **Page Linkage**: Upon the first synchronization of a local note, a Notion page is created in the resolved database. The resulting Notion Page ID is written back to the note's YAML frontmatter as `notion_page_id: "..."`.
+3. **Subsequent Saves**: When you save a note that already contains a `notion_page_id`, the engine updates the page properties (name, tags, summary, date) and cleanly syncs/re-builds the block contents in the background.
+

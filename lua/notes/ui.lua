@@ -76,6 +76,18 @@ local function open_note_buffer(filepath, target_line)
 
 		-- Buffer-local shortcut 'q' to save and close the float modal
 		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Float" })
+	elseif config.editor_style == "tab" then
+		vim.cmd("tabnew")
+		vim.api.nvim_win_set_buf(0, buf)
+		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>tabclose<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Tab" })
+	elseif config.editor_style == "split" then
+		vim.cmd("split")
+		vim.api.nvim_win_set_buf(0, buf)
+		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Split" })
+	elseif config.editor_style == "vsplit" then
+		vim.cmd("vsplit")
+		vim.api.nvim_win_set_buf(0, buf)
+		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Split" })
 	else
 		-- Traditional: open in the current window
 		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
@@ -949,7 +961,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 			return
 		end
 
-		if config.editor_style ~= "float" then
+		if config.editor_style ~= "float" and config.editor_style ~= "tab" then
 			vim.cmd("wincmd p")
 		end
 		open_note_buffer(note_path)
@@ -1093,7 +1105,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 					f:write(content)
 					f:close()
 					vim.notify("Note created: " .. input_path, vim.log.levels.INFO)
-					if config.editor_style ~= "float" then
+					if config.editor_style ~= "float" and config.editor_style ~= "tab" then
 						vim.cmd("wincmd p")
 					end
 					open_note_buffer(abs_path)
