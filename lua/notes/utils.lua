@@ -6,6 +6,8 @@ local config = require("notes.config").get_config()
 M.sanitize_title = function(title)
 	-- Replace spaces and non-alphanumeric characters with hyphens
 	local sanitized = title:gsub("[^%w%s-]", ""):gsub("%s+", "-"):lower()
+	-- Collapse multiple hyphens into a single hyphen
+	sanitized = sanitized:gsub("-+", "-")
 	-- Trim hyphens from start and end
 	return sanitized:gsub("^-+", ""):gsub("-+$", "")
 end

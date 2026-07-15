@@ -65,25 +65,31 @@ M.setup = function(opts)
 	M.search_notes = ui.search_notes
 	M.paste_image = utils.paste_image
 	M.follow_wiki_link = ui.follow_wiki_link
+	M.quick_capture = ui.quick_capture
 	M.notion_sync = function()
 		require("notes.notion.sync").sync_active_note()
 	end
+	M.outline = ui.outline
+	M.insert_toc = ui.insert_toc
+	M.choose_icon = ui.choose_icon
 
 	-- Set up global keymaps if provided in setup options
 	if config.config and config.config.keymaps then
 		local keymaps = config.config.keymaps
 		for mode, mode_maps in pairs(keymaps) do
 			for key, func_name in pairs(mode_maps) do
-				local desc = config.config.key_desc[func_name] or "No description from notes.nvim"
-				if config.config.fn[func_name] then
-					vim.keymap.set(
-						mode,
-						key,
-						config.config.fn[func_name],
-						{ noremap = true, silent = true, desc = desc }
-					)
-				else
-					vim.notify("Function " .. func_name .. " not found in notes plugin", vim.log.levels.WARN)
+				if func_name and func_name ~= "" and func_name ~= false then
+					local desc = config.config.key_desc[func_name] or "No description from notes.nvim"
+					if config.config.fn[func_name] then
+						vim.keymap.set(
+							mode,
+							key,
+							config.config.fn[func_name],
+							{ noremap = true, silent = true, desc = desc }
+						)
+					else
+						vim.notify("Function " .. func_name .. " not found in notes plugin", vim.log.levels.WARN)
+					end
 				end
 			end
 		end
@@ -114,6 +120,41 @@ M.setup = function(opts)
 			vim.keymap.set("n", "<leader>nt", function()
 				require("notes.tasks").toggle_task()
 			end, { buffer = ev.buf, desc = "Toggle Markdown Task", silent = true })
+
+			-- Bind toggle highlight to <leader>nh
+			vim.keymap.set({ "n", "v" }, "<leader>nh", function()
+				require("notes.highlight").toggle_highlight()
+			end, { buffer = ev.buf, desc = "Toggle Markdown Highlight", silent = true })
+
+			-- Configure omnifunc for wiki-link completion
+			vim.bo[ev.buf].omnifunc = "v:lua.require'notes.ui'.omnifunc"
+		end,
+	})
+
+	-- Create autocommand for syntax highlighting of ==text== in note buffers
+	vim.api.nvim_create_autocmd("FileType", {
+		group = group,
+		pattern = "markdown",
+		callback = function(ev)
+			local buf_name = vim.api.nvim_buf_get_name(ev.buf)
+			if buf_name ~= "" then
+				local resolved_name = vim.fn.resolve(buf_name)
+				local expanded_notes_dir = vim.fn.resolve(notes_dir)
+				if resolved_name:sub(1, #expanded_notes_dir) == expanded_notes_dir then
+					vim.cmd([[syntax region NotesHighlight start="==" end="==" concealends]])
+					vim.cmd([[highlight default link NotesHighlight Search]])
+				end
+			end
+		end,
+	})
+
+	vim.api.nvim_create_autocmd("BufWritePre", {
+		group = group,
+		pattern = { pattern_root, pattern_nested },
+		callback = function(ev)
+			if config.config.auto_toc then
+				require("notes.toc").update_toc(ev.buf)
+			end
 		end,
 	})
 
@@ -127,6 +168,9 @@ M.setup = function(opts)
 			end
 		end,
 	})
+
+	-- Initialize Git autocommands
+	require("notes.git").setup_autocmds()
 end
 
 return M

@@ -38,12 +38,13 @@ return {
       editor_style = "current",            -- "current" (default), "float", "tab", "split", or "vsplit"
       keymaps = {
         n = {
-          ["<leader>nc"] = "new",          -- Create a new note
+          ["<leader>nn"] = "new",          -- Create a new note
           ["<leader>nd"] = "daily",        -- Open today's daily journal
           ["<leader>nl"] = "list",         -- List notes using Telescope
           ["<leader>ne"] = "explorer",     -- Toggle the sidebar explorer
           ["<leader>ns"] = "search",       -- Live search note contents
           ["<leader>np"] = "paste_image",  -- Paste clipboard image
+          ["<leader>nc"] = "quick_capture",-- Quick scratchpad capture
         },
       },
     }
@@ -65,6 +66,7 @@ The plugin registers a unified `:Notes` user command with completion support:
 | `:Notes list` | List notes with Telescope formatted in columns. |
 | `:Notes search` | Search (live grep) note contents. |
 | `:Notes paste_image` | Paste clipboard image and insert relative markdown link. |
+| `:Notes capture` | Open a temporary scratchpad to quickly append thoughts/tasks to today's daily note. |
 
 ---
 
@@ -82,6 +84,7 @@ Toggle the sidebar with `:Notes explorer` or your bound key.
 * `p`: Paste the copied note from the clipboard register into the current directory context.
 * `n`: Prompt to create a new note (opens template picker).
 * `s`: Search inside note contents globally.
+* `R`: Refresh/Reload the explorer directory structure.
 * `q`: Close the explorer sidebar.
 * `?`: Show the help popup displaying all available keymaps.
 
@@ -93,6 +96,7 @@ When editing markdown files in your `notes_dir`, the plugin automatically activa
 
 * **Wiki-link Jump (`<CR>`)**: Press `<CR>` while cursor is on `[[Link]]` to navigate to that note.
 * **Task Toggle (`<leader>nt`)**: Toggle checklist state on the current line between `- [ ]` and `- [x]`.
+* **Highlight Toggle (`<leader>nh`)**: Highlight the selected text in visual mode or toggle highlighting on the word under the cursor using `==` tags.
 
 ---
 
@@ -122,17 +126,26 @@ summary: ""
 %BODY%
 ]],
 
-  -- Bind your user commands to custom keys
+  -- Optional Git Auto-Commit Integration
+  git = {
+    enabled = false,                       -- Toggle Git auto-commit support
+    auto_commit = true,                    -- Commit automatically on save/rename/delete
+    commit_message = "update notes",       -- Base commit message
+  },
+
+  -- Default keymaps are registered automatically. Override any keys below:
   keymaps = {
     n = {
-      ["<leader>nc"] = "new",
+      ["<leader>nn"] = "new",
       ["<leader>nd"] = "daily",
       ["<leader>nl"] = "list",
       ["<leader>ne"] = "explorer",
       ["<leader>ns"] = "search",
       ["<leader>np"] = "paste_image",
+      ["<leader>nc"] = "quick_capture",
     }
   }
+  -- Set keymaps = false to disable default bindings completely
 })
 ```
 
@@ -224,4 +237,34 @@ require("notes").setup {
    - Fall back to the configured `default_database`.
 2. **Page Linkage**: Upon the first synchronization of a local note, a Notion page is created in the resolved database. The resulting Notion Page ID is written back to the note's YAML frontmatter as `notion_page_id: "..."`.
 3. **Subsequent Saves**: When you save a note that already contains a `notion_page_id`, the engine updates the page properties (name, tags, summary, date) and cleanly syncs/re-builds the block contents in the background.
+
+---
+
+## 💾 Git Auto-Commit Integration (Optional)
+
+`notes.nvim` includes an optional Git integration that automatically stages and commits your notes in the background. It is designed to be completely non-blocking, using Neovim's asynchronous process API (`vim.system`).
+
+The plugin checks if Git is installed and whether your notes directory is a Git repository. If either check fails, the feature gracefully degrades and does nothing, preventing any editor crashes.
+
+### Configuration
+
+To enable the Git integration, add the `git` configuration table to your setup:
+
+```lua
+require("notes").setup({
+  notes_dir = "~/.notes",
+  git = {
+    enabled = true,                        -- Enable Git integration
+    auto_commit = true,                    -- Auto-commit changes on file writes/deletes/renames
+    commit_message = "update notes",       -- Custom commit message
+  }
+})
+```
+
+### How It Works
+
+1. **Automatic Saves**: Whenever you write/save a note buffer within your `notes_dir`, the plugin automatically runs `git add -A` and `git commit -m "<commit_message>"` in the background.
+2. **File Operations**: Background commits are automatically generated for file actions that don't trigger normal buffer write events (e.g. deleting/renaming notes inside the explorer, saving a quick capture scratchpad, pasting images, and move operations).
+3. **No Network Activity**: The plugin only performs `git add` and `git commit` operations. It never performs remote network operations like `git push` or `git pull`, ensuring offline compatibility and speed.
+
 

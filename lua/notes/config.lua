@@ -7,6 +7,8 @@ M.config = {
 	date_format = "%Y-%m-%d",
 	time_format = "%H:%M:%S",
 	editor_style = "current", -- "current" (default), "float", "tab", "split", or "vsplit"
+	auto_toc = true,
+	toc_max_level = 4,
 	template = [[---
 title: "%TITLE%"
 date: "%DATE%"
@@ -79,8 +81,55 @@ summary: ""
 
 ## Action Items
 ]],
+		bug = [[---
+title: "Bug: %TITLE%"
+date: "%DATE%"
+tags: ["bug"]
+summary: ""
+---
+
+# Bug: %TITLE%
+
+## Symptoms
+
+## Reproduction Steps
+
+## Root Cause Analysis
+
+## Resolution
+]],
+		til = [[---
+title: "TIL: %TITLE%"
+date: "%DATE%"
+tags: ["til"]
+summary: ""
+---
+
+# TIL: %TITLE%
+
+## Concept
+
+## Code / CLI Example
+
+## Gotchas
+
+## References
+]],
 	},
-	keymaps = {},
+	keymaps = {
+		n = {
+			["<leader>nn"] = "new",
+			["<leader>nd"] = "daily",
+			["<leader>nl"] = "list",
+			["<leader>ne"] = "explorer",
+			["<leader>ns"] = "search",
+			["<leader>np"] = "paste_image",
+			["<leader>nc"] = "quick_capture",
+			["<leader>nto"] = "outline",
+			["<leader>ntc"] = "insert_toc",
+			["<leader>ni"] = "choose_icon",
+		},
+	},
 	key_desc = {
 		new = "Notes: New",
 		daily = "Notes: Open Daily",
@@ -97,6 +146,10 @@ summary: ""
 		daily_prev = "Notes: Previous Daily",
 		daily_next = "Notes: Next Daily",
 		notion_sync = "Notes: Notion Sync",
+		quick_capture = "Notes: Quick Capture Scratchpad",
+		outline = "Notes: Interactive Outline",
+		insert_toc = "Notes: Insert Table of Contents",
+		choose_icon = "Notes: Choose Icon",
 	},
 	length_summary = 140,
 	length_title = 60,
@@ -115,6 +168,11 @@ summary: ""
 				summary = "Summary",
 			},
 		},
+	},
+	git = {
+		enabled = false,
+		auto_commit = true,
+		commit_message = "update notes",
 	},
 	fn = {
 		new = function(title)
@@ -162,12 +220,29 @@ summary: ""
 		notion_sync = function()
 			require("notes.notion.sync").sync_active_note()
 		end,
+		quick_capture = function()
+			require("notes.ui").quick_capture()
+		end,
+		outline = function()
+			require("notes.ui").outline()
+		end,
+		insert_toc = function()
+			require("notes.ui").insert_toc()
+		end,
+		choose_icon = function()
+			require("notes.ui").choose_icon()
+		end,
 	},
 }
 
 -- Function to set up the plugin
 M.setup = function(opts)
-	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+	opts = opts or {}
+	if opts.keymaps == false then
+		M.config.keymaps = {}
+		opts.keymaps = nil
+	end
+	M.config = vim.tbl_deep_extend("force", M.config, opts)
 
 	if opts.notes_dir then
 		M.config.notes_dir = vim.fn.expand(opts.notes_dir)
