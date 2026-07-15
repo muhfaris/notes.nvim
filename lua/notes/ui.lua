@@ -10,6 +10,7 @@ local conf = require("telescope.config").values
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 local entry_display = require("telescope.pickers.entry_display")
+local previewers = require("telescope.previewers")
 
 local EXPLORER_BUF_NAME = "notes://explorer"
 local copied_note_path = nil
@@ -17,6 +18,17 @@ local copied_note_path = nil
 -- Helper to open a note buffer based on the editor_style setting (current vs float)
 local function open_note_buffer(filepath, target_line)
 	local buf = vim.fn.bufadd(filepath)
+	local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+	if ext ~= "md" then
+		-- For non-markdown assets (like images), if the buffer is already loaded,
+		-- wipe it first so that it is freshly loaded and triggers snacks.image autocommands
+		if vim.api.nvim_buf_is_loaded(buf) then
+			pcall(vim.api.nvim_buf_delete, buf, { force = true })
+			buf = vim.fn.bufadd(filepath)
+		end
+		vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+	end
+
 	vim.fn.bufload(buf)
 	vim.b[buf].notes_editor = true
 
@@ -372,7 +384,17 @@ M.new_note = function(title)
 		for k, _ in pairs(config.templates) do
 			table.insert(keys, k)
 		end
+		if config.daily_template and not config.templates.daily then
+			table.insert(keys, "daily")
+		end
 		table.sort(keys)
+
+		local function get_template_content(name)
+			if name == "daily" and not config.templates.daily then
+				return config.daily_template
+			end
+			return config.templates[name]
+		end
 
 		if #keys > 1 then
 			pickers.new({}, {
@@ -381,12 +403,24 @@ M.new_note = function(title)
 					results = keys,
 				}),
 				sorter = conf.generic_sorter({}),
+				previewer = previewers.new_buffer_previewer({
+					title = "Template Preview",
+					define_preview = function(self, entry, status)
+						local template_name = entry.value
+						local template_content = get_template_content(template_name)
+						if template_content then
+							local lines = vim.split(template_content, "\n")
+							vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+							vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+						end
+					end,
+				}),
 				attach_mappings = function(prompt_bufnr, map)
 					actions.select_default:replace(function()
 						actions.close(prompt_bufnr)
 						local selection = action_state.get_selected_entry()
 						if selection then
-							local template_content = config.templates[selection.value]
+							local template_content = get_template_content(selection.value)
 							get_title_and_create(template_content)
 						end
 					end)
@@ -395,7 +429,7 @@ M.new_note = function(title)
 			}):find()
 			return
 		elseif #keys == 1 then
-			get_title_and_create(config.templates[keys[1]])
+			get_title_and_create(get_template_content(keys[1]))
 			return
 		end
 	end
@@ -541,7 +575,7 @@ M.list_tasks = function()
 	}):find()
 end
 
--- Built-in omnifunc completion handler for wiki-links
+--- Built-in omnifunc completion handler for wiki-links
 M.omnifunc = function(findstart, base)
 	if findstart == 1 then
 		local line = vim.api.nvim_get_current_line()
@@ -561,18 +595,70 @@ M.omnifunc = function(findstart, base)
 
 		for _, note_path in ipairs(notes) do
 			local filename = vim.fn.fnamemodify(note_path, ":t:r")
-			local title = filename
-			local metadata = parser.read_file(note_path)
-			if metadata and metadata.title and metadata.title ~= "" then
-				title = metadata.title
+			local rel_path = note_path:sub(#config.notes_dir + 2):gsub("%.md$", ""):gsub("\\", "/")
+			local is_daily = false
+			local dy, dm, dd = note_path:match("(%d%d%d%d)/(%d%d)/(%d%d)/daily%.md$")
+			if not dy then
+				dy, dm, dd = note_path:match("(%d%d%d%d)%-%(%d%d)%-%(%d%d)%.md$")
 			end
 
-			if base == "" or title:lower():find(base_lower, 1, true) or filename:lower():find(base_lower, 1, true) then
-				table.insert(matches, {
-					word = title .. "]]",
-					abbr = title,
-					menu = "[Note]",
-				})
+			local metadata = parser.read_file(note_path)
+
+			if dy and dm and dd then
+				is_daily = true
+				local date_str = string.format("%s-%s-%s", dy, dm, dd)
+				local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title or ("Daily Note: " .. date_str)
+
+				-- Suggest by pretty daily title (e.g. "Daily Note: 2026-07-14")
+				if base == "" or title:lower():find(base_lower, 1, true) then
+					table.insert(matches, {
+						word = title .. "]]",
+						abbr = title,
+						menu = "[Daily Note]",
+					})
+				end
+
+				-- Suggest by date (e.g. "2026-07-14")
+				if base == "" or date_str:lower():find(base_lower, 1, true) then
+					table.insert(matches, {
+						word = title .. "]]",
+						abbr = date_str,
+						menu = "[Daily Date]",
+					})
+				end
+			else
+				local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title or nil
+
+				-- 1. Suggest by pretty title
+				if title then
+					if base == "" or title:lower():find(base_lower, 1, true) or filename:lower():find(base_lower, 1, true) or rel_path:lower():find(base_lower, 1, true) then
+						table.insert(matches, {
+							word = title .. "]]",
+							abbr = title,
+							menu = "[Title]",
+						})
+					end
+				end
+
+				-- 2. Suggest by relative path
+				if base == "" or rel_path:lower():find(base_lower, 1, true) or filename:lower():find(base_lower, 1, true) then
+					table.insert(matches, {
+						word = (title or rel_path) .. "]]",
+						abbr = rel_path,
+						menu = "[Path]",
+					})
+				end
+
+				-- 3. Suggest by filename (if different from rel_path and title)
+				if filename ~= rel_path and (not title or filename ~= title) then
+					if base == "" or filename:lower():find(base_lower, 1, true) then
+						table.insert(matches, {
+							word = (title or filename) .. "]]",
+							abbr = filename,
+							menu = "[Note]",
+						})
+					end
+				end
 			end
 		end
 		return matches
@@ -603,8 +689,11 @@ M.follow_wiki_link = function()
 		return
 	end
 
-	-- Check if reference is a daily note (YYYY-MM-DD or YYYY/MM/DD)
+	-- Check if reference is a daily note date (YYYY-MM-DD or YYYY/MM/DD)
 	local yyyy, mm, dd = link_title:match("^(%d%d%d%d)[%-/](%d%d)[%-/](%d%d)$")
+	if not yyyy then
+		yyyy, mm, dd = link_title:match("^Daily%s+Note:%s*(%d%d%d%d)[%-/](%d%d)[%-/](%d%d)$")
+	end
 	if yyyy and mm and dd then
 		local norm_date = string.format("%s-%s-%s", yyyy, mm, dd)
 		local nested_daily_path = string.format("%s/%s/%s/%s/daily.md", config.notes_dir, yyyy, mm, dd)
@@ -643,15 +732,62 @@ M.follow_wiki_link = function()
 		return
 	end
 
-	local sanitized = utils.sanitize_title(link_title)
+	-- Priority-based general note resolution
+	local normalized_link = link_title:gsub("\\", "/"):gsub("^/+", ""):gsub("/+$", "")
+	local sanitized_link = utils.sanitize_title(link_title)
+	local collapsed_sanitized_link = sanitized_link:gsub("-+", "-")
+	
 	local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
 	local target_path = nil
 
-	for _, note in ipairs(notes) do
-		local filename = vim.fn.fnamemodify(note, ":t:r")
-		if filename == sanitized or filename:match("^" .. vim.pesc(sanitized) .. "_") then
-			target_path = note
-			break
+	-- 1. Direct Relative/Absolute Path Match (case-insensitive)
+	local direct_path = config.notes_dir .. "/" .. normalized_link
+	if not direct_path:match("%.md$") then
+		direct_path = direct_path .. ".md"
+	end
+	if vim.fn.filereadable(direct_path) == 1 then
+		target_path = direct_path
+	end
+
+	-- 2. Relative Path Scan (case-insensitive)
+	if not target_path then
+		local link_lower = normalized_link:lower()
+		for _, note in ipairs(notes) do
+			local rel_path = note:sub(#config.notes_dir + 2):gsub("%.md$", ""):gsub("\\", "/")
+			if rel_path:lower() == link_lower then
+				target_path = note
+				break
+			end
+		end
+	end
+
+	-- 3. Filename Match (exact or collapsed hyphens)
+	if not target_path then
+		for _, note in ipairs(notes) do
+			local filename = vim.fn.fnamemodify(note, ":t:r")
+			local collapsed_filename = filename:gsub("-+", "-")
+			if filename:lower() == normalized_link:lower()
+				or filename == sanitized_link
+				or collapsed_filename == collapsed_sanitized_link
+				or filename:match("^" .. vim.pesc(sanitized_link) .. "_") then
+				target_path = note
+				break
+			end
+		end
+	end
+
+	-- 4. Frontmatter Title Match
+	if not target_path then
+		for _, note in ipairs(notes) do
+			local metadata = parser.read_file(note)
+			if metadata and metadata.title then
+				local meta_title = metadata.title
+				local collapsed_meta_title = utils.sanitize_title(meta_title):gsub("-+", "-")
+				if meta_title:lower() == link_title:lower() or collapsed_meta_title == collapsed_sanitized_link then
+					target_path = note
+					break
+				end
+			end
 		end
 	end
 
@@ -668,9 +804,9 @@ M.follow_wiki_link = function()
 			local filename
 			if yyyy_now and mm_now and dd_now then
 				dir_path = string.format("%s/%s/%s/%s", config.notes_dir, yyyy_now, mm_now, dd_now)
-				filename = sanitized .. ".md"
+				filename = sanitized_link .. ".md"
 			else
-				filename = string.format("%s_%s.md", sanitized, date)
+				filename = string.format("%s_%s.md", sanitized_link, date)
 			end
 
 			if vim.fn.isdirectory(dir_path) == 0 then
@@ -819,6 +955,60 @@ M.search_notes = function()
 	})
 end
 
+-- Helper to get the folder icon and highlight group dynamically
+local function get_dir_icon(path, expanded)
+	if _G.MiniIcons then
+		local icon, hl = MiniIcons.get("directory", path)
+		if icon then
+			if not icon:match("%s$") then
+				icon = icon .. " "
+			end
+			return icon, hl
+		end
+	end
+
+	local icon = expanded and " " or " "
+	return icon, "Directory"
+end
+
+-- Helper to get the file icon and highlight group dynamically
+local function get_file_icon(filepath)
+	local filename = vim.fn.fnamemodify(filepath, ":t")
+	local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+
+	-- Try mini.icons first
+	if _G.MiniIcons then
+		local icon, hl = MiniIcons.get("file", filepath)
+		if icon then
+			if not icon:match("%s$") then
+				icon = icon .. " "
+			end
+			return icon, hl
+		end
+	end
+
+	-- Try nvim-web-devicons
+	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+	if has_devicons then
+		local icon, hl = devicons.get_icon(filename, ext, { default = true })
+		if icon then
+			if not icon:match("%s$") then
+				icon = icon .. " "
+			end
+			return icon, hl
+		end
+	end
+
+	-- Fallbacks
+	if ext == "md" then
+		return " ", "Special"
+	elseif ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "webp" or ext == "gif" or ext == "svg" then
+		return " ", "WarningMsg"
+	else
+		return " ", "Normal"
+	end
+end
+
 -- Render the dedicated Notes Explorer dashboard
 M.render_explorer = function(buf)
 	local cursor = nil
@@ -851,8 +1041,14 @@ M.render_explorer = function(buf)
 				local abs_path = current_dir .. "/" .. name
 				if vim.fn.isdirectory(abs_path) == 1 then
 					table.insert(dirs, { name = name, path = abs_path })
-				elseif name:match("%.md$") then
-					table.insert(files, { name = name, path = abs_path })
+				else
+					local ext = name:match("%.([^%.]+)$")
+					if ext then
+						ext = ext:lower()
+						if ext == "md" or ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "webp" or ext == "gif" or ext == "svg" then
+							table.insert(files, { name = name, path = abs_path })
+						end
+					end
 				end
 			end
 		end
@@ -868,7 +1064,7 @@ M.render_explorer = function(buf)
 			end
 			local expanded = _G.notes_explorer_expanded[d.path]
 
-			local icon = expanded and " " or " "
+			local icon, icon_hl = get_dir_icon(d.path, expanded)
 			local line_text = string.format("%s%s %s/", indent, icon, d.name)
 			table.insert(lines, line_text)
 			local line_idx = #lines - 1
@@ -876,7 +1072,8 @@ M.render_explorer = function(buf)
 
 			-- Highlight icon and directory name
 			local start_col = #indent
-			table.insert(highlight_actions, { line = line_idx, hl = "Directory", start_col = start_col, end_col = -1 })
+			table.insert(highlight_actions, { line = line_idx, hl = icon_hl or "Directory", start_col = start_col, end_col = start_col + #icon })
+			table.insert(highlight_actions, { line = line_idx, hl = "Directory", start_col = start_col + #icon, end_col = -1 })
 
 			if expanded then
 				traverse(d.path, depth + 1)
@@ -886,22 +1083,45 @@ M.render_explorer = function(buf)
 		-- Render files
 		for _, f in ipairs(files) do
 			local indent = string.rep("  ", depth + 1)
-			local title = nil
-			local metadata, _ = parser.read_file(f.path)
-			if metadata then
-				title = metadata.title
-			end
-			title = title or vim.fn.fnamemodify(f.path, ":t:r")
+			local ext = vim.fn.fnamemodify(f.path, ":e"):lower()
+			local is_md = (ext == "md")
 
-			local icon = " "
-			local line_text = string.format("%s%s %s", indent, icon, title)
+			local title = nil
+			local metadata = nil
+			if is_md then
+				metadata, _ = parser.read_file(f.path)
+				if metadata then
+					title = metadata.title
+				end
+			end
+
+			local display_name
+			if is_md then
+				title = title or vim.fn.fnamemodify(f.path, ":t:r")
+				display_name = title
+			else
+				display_name = vim.fn.fnamemodify(f.path, ":t")
+			end
+
+			local icon, icon_hl
+			if is_md and metadata and metadata.icon and metadata.icon ~= "" then
+				icon = metadata.icon
+				if not icon:match("%s$") then
+					icon = icon .. " "
+				end
+				icon_hl = "Special"
+			else
+				icon, icon_hl = get_file_icon(f.path)
+			end
+
+			local line_text = string.format("%s%s%s", indent, icon, display_name)
 			table.insert(lines, line_text)
 			local line_idx = #lines - 1
 			line_to_path[line_idx + 1] = f.path
 
 			-- Highlight file
 			local start_col = #indent
-			table.insert(highlight_actions, { line = line_idx, hl = "Special", start_col = start_col, end_col = start_col + #icon })
+			table.insert(highlight_actions, { line = line_idx, hl = icon_hl, start_col = start_col, end_col = start_col + #icon })
 			table.insert(highlight_actions, { line = line_idx, hl = "Normal", start_col = start_col + #icon, end_col = -1 })
 		end
 	end
@@ -978,6 +1198,38 @@ M.bind_explorer_keys = function(buf, line_to_path)
 			return
 		end
 
+		local ext = vim.fn.fnamemodify(note_path, ":e"):lower()
+		if ext ~= "md" then
+			-- If snacks.image is active and supports the file/terminal, open it inside Neovim
+			local has_snacks_image = false
+			if _G.Snacks and _G.Snacks.image and _G.Snacks.image.supports then
+				has_snacks_image = _G.Snacks.image.supports(note_path)
+			end
+
+			if has_snacks_image then
+				if config.editor_style ~= "float" and config.editor_style ~= "tab" then
+					vim.cmd("wincmd p")
+				end
+				open_note_buffer(note_path)
+				return
+			end
+
+			-- Non-markdown asset (like an image), open with system viewer
+			if vim.ui.open then
+				vim.ui.open(note_path)
+			else
+				local opener = "xdg-open"
+				if vim.fn.has("macunix") == 1 then
+					opener = "open"
+				elseif vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+					opener = "start"
+				end
+				vim.fn.jobstart({ opener, note_path }, { detach = true })
+			end
+			vim.notify("Opening asset in system viewer...", vim.log.levels.INFO)
+			return
+		end
+
 		if config.editor_style ~= "float" and config.editor_style ~= "tab" then
 			vim.cmd("wincmd p")
 		end
@@ -993,12 +1245,24 @@ M.bind_explorer_keys = function(buf, line_to_path)
 
 		local filename = vim.fn.fnamemodify(note_path, ":t")
 		local is_dir = vim.fn.isdirectory(note_path) == 1
-		local type_str = is_dir and "directory" or "note"
+		local type_str = "file"
+		if is_dir then
+			type_str = "directory"
+		else
+			local ext = vim.fn.fnamemodify(note_path, ":e"):lower()
+			if ext == "md" then
+				type_str = "note"
+			elseif ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "webp" or ext == "gif" or ext == "svg" then
+				type_str = "image"
+			end
+		end
+
 		local confirm = vim.fn.confirm("Delete " .. type_str .. " '" .. filename .. "'?", "&Yes\n&No", 2)
 		if confirm == 1 then
 			vim.fn.delete(note_path, "rf")
-			vim.notify((is_dir and "Directory" or "Note") .. " deleted: " .. filename, vim.log.levels.INFO)
+			vim.notify((is_dir and "Directory" or (type_str:sub(1, 1):upper() .. type_str:sub(2))) .. " deleted: " .. filename, vim.log.levels.INFO)
 			M.render_explorer(buf)
+			require("notes.git").commit("delete " .. type_str .. ": " .. filename)
 		end
 	end
 
@@ -1009,13 +1273,14 @@ M.bind_explorer_keys = function(buf, line_to_path)
 			return
 		end
 
+		local parent_dir = vim.fn.fnamemodify(note_path, ":h")
+
 		if vim.fn.isdirectory(note_path) == 1 then
 			local dirname = vim.fn.fnamemodify(note_path, ":t")
 			vim.ui.input({ prompt = "Rename directory: ", default = dirname }, function(new_name)
 				if not new_name or new_name == "" or new_name == dirname then
 					return
 				end
-				local parent_dir = vim.fn.fnamemodify(note_path, ":h")
 				local new_path = parent_dir .. "/" .. new_name
 				if vim.fn.isdirectory(new_path) == 1 or vim.fn.filereadable(new_path) == 1 then
 					vim.notify("Path already exists: " .. new_name, vim.log.levels.WARN)
@@ -1025,8 +1290,34 @@ M.bind_explorer_keys = function(buf, line_to_path)
 				if ok then
 					vim.notify("Directory renamed to: " .. new_name, vim.log.levels.INFO)
 					M.render_explorer(buf)
+					require("notes.git").commit(string.format("rename directory: %s -> %s", dirname, new_name))
 				else
 					vim.notify("Failed to rename directory: " .. tostring(err), vim.log.levels.ERROR)
+				end
+			end)
+			return
+		end
+
+		local ext = vim.fn.fnamemodify(note_path, ":e"):lower()
+		if ext ~= "md" then
+			-- Non-markdown asset (like an image), rename directly
+			local filename = vim.fn.fnamemodify(note_path, ":t")
+			vim.ui.input({ prompt = "Rename file: ", default = filename }, function(new_name)
+				if not new_name or new_name == "" or new_name == filename then
+					return
+				end
+				local new_path = parent_dir .. "/" .. new_name
+				if vim.fn.filereadable(new_path) == 1 then
+					vim.notify("File already exists: " .. new_name, vim.log.levels.WARN)
+					return
+				end
+				local ok, err = os.rename(note_path, new_path)
+				if ok then
+					vim.notify("File renamed to: " .. new_name, vim.log.levels.INFO)
+					M.render_explorer(buf)
+					require("notes.git").commit(string.format("rename file: %s -> %s", filename, new_name))
+				else
+					vim.notify("Failed to rename file: " .. tostring(err), vim.log.levels.ERROR)
 				end
 			end)
 			return
@@ -1064,6 +1355,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 				end
 				vim.notify("Note renamed to: " .. new_filename, vim.log.levels.INFO)
 				M.render_explorer(buf)
+				require("notes.git").commit(string.format("rename note: %s -> %s", vim.fn.fnamemodify(note_path, ":t"), new_filename))
 			else
 				vim.notify("Failed to rename note file.", vim.log.levels.ERROR)
 			end
@@ -1096,6 +1388,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 				vim.fn.mkdir(clean_path, "p")
 				vim.notify("Directory created: " .. clean_rel, vim.log.levels.INFO)
 				M.render_explorer(buf)
+				require("notes.git").commit("create directory: " .. clean_rel)
 			else
 				-- It's a file
 				if not input_path:match("%.md$") then
@@ -1127,6 +1420,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 					end
 					open_note_buffer(abs_path)
 					M.render_explorer(buf)
+					require("notes.git").commit("create note: " .. input_path)
 				else
 					vim.notify("Failed to create file: " .. abs_path, vim.log.levels.ERROR)
 				end
@@ -1188,6 +1482,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 					end
 				end
 				M.render_explorer(buf)
+				require("notes.git").commit(string.format("move: %s -> %s", relative_path, input_path))
 			else
 				vim.notify("Failed to move: " .. note_path, vim.log.levels.ERROR)
 			end
@@ -1257,6 +1552,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 				copy_dir_recursive(copied_note_path, new_path)
 				vim.notify("Directory pasted to: " .. input_path, vim.log.levels.INFO)
 				M.render_explorer(buf)
+				require("notes.git").commit("paste directory: " .. input_path)
 			else
 				if vim.fn.filereadable(new_path) == 1 then
 					vim.notify("Destination file already exists: " .. input_path, vim.log.levels.WARN)
@@ -1276,6 +1572,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 						outfile:close()
 						vim.notify("Note pasted to: " .. input_path, vim.log.levels.INFO)
 						M.render_explorer(buf)
+						require("notes.git").commit("paste note: " .. input_path)
 					else
 						vim.notify("Failed to write pasted note file.", vim.log.levels.ERROR)
 					end
@@ -1298,6 +1595,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 			" c        : Copy selected note/dir to clipboard",
 			" p        : Paste copied note/dir to folder",
 			" s        : Search all notes",
+			" R        : Refresh explorer",
 			" q        : Close explorer sidebar",
 			" ?        : Show this help menu",
 			"",
@@ -1349,6 +1647,10 @@ M.bind_explorer_keys = function(buf, line_to_path)
 	vim.keymap.set("n", "q", ":close<CR>", opts)
 	vim.keymap.set("n", "s", function()
 		M.search_notes()
+	end, opts)
+	vim.keymap.set("n", "R", function()
+		M.render_explorer(buf)
+		vim.notify("Notes Explorer refreshed", vim.log.levels.INFO)
 	end, opts)
 	vim.keymap.set("n", "a", add_item, opts)
 	vim.keymap.set("n", "m", move_item, opts)
@@ -1733,6 +2035,7 @@ M.rename_active_note = function()
 	end
 
 	local current_dir = vim.fn.fnamemodify(active_abs, ":h")
+	local old_filename = vim.fn.fnamemodify(active_abs, ":t")
 
 	prompt_title_popup(function(new_title)
 		if not new_title or new_title == "" then
@@ -1753,6 +2056,7 @@ M.rename_active_note = function()
 					f:close()
 					vim.cmd("edit")
 					vim.notify("Note title updated.", vim.log.levels.INFO)
+					require("notes.git").commit("rename note title: " .. new_title)
 				end
 			end
 			return
@@ -1787,6 +2091,7 @@ M.rename_active_note = function()
 		vim.cmd("edit " .. vim.fn.fnameescape(target_path))
 		pcall(vim.api.nvim_buf_delete, active_buf, { force = true })
 		vim.notify("Note renamed to: " .. sanitized .. ".md", vim.log.levels.INFO)
+		require("notes.git").commit(string.format("rename note: %s -> %s", old_filename, sanitized .. ".md"))
 	end)
 end
 
@@ -1812,7 +2117,407 @@ M.delete_active_note = function()
 		os.remove(active_abs)
 		pcall(vim.api.nvim_buf_delete, active_buf, { force = true })
 		vim.notify("Note deleted: " .. filename, vim.log.levels.INFO)
+		require("notes.git").commit("delete note: " .. filename)
 	end
+end
+
+-- API to quickly capture a note/task and append it to today's daily note
+M.quick_capture = function()
+	local width = 60
+	local height = 4
+	local row = math.floor((vim.o.lines - height) / 2)
+	local col = math.floor((vim.o.columns - width) / 2)
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	local win = vim.api.nvim_open_win(buf, true, {
+		relative = "editor",
+		width = width,
+		height = height,
+		row = row,
+		col = col,
+		style = "minimal",
+		border = "rounded",
+		title = " Quick Capture (Scratchpad) ",
+		title_pos = "center",
+		footer = " <C-s> or <CR>: save & close | q: cancel ",
+		footer_pos = "center",
+	})
+
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
+	vim.cmd("startinsert")
+
+	local closed = false
+	local function close()
+		if closed then
+			return
+		end
+		closed = true
+		if vim.api.nvim_win_is_valid(win) then
+			vim.api.nvim_win_close(win, true)
+		end
+		local mode = vim.api.nvim_get_mode().mode
+		if mode:sub(1, 1) == "i" then
+			vim.cmd("stopinsert")
+		end
+	end
+
+	local function submit()
+		local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+		-- Filter out empty lines and ensure list item formatting
+		local cleaned_lines = {}
+		for _, l in ipairs(lines) do
+			local trimmed = vim.trim(l)
+			if trimmed ~= "" then
+				if not trimmed:match("^%s*[-*+]") then
+					trimmed = "- [ ] " .. trimmed
+				end
+				table.insert(cleaned_lines, trimmed)
+			end
+		end
+
+		close()
+
+		if #cleaned_lines > 0 then
+			local date = os.date(config.date_format)
+			local yyyy, mm, dd = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+			local dir_path = config.notes_dir
+			local filename
+			if yyyy and mm and dd then
+				dir_path = string.format("%s/%s/%s/%s", config.notes_dir, yyyy, mm, dd)
+				filename = "daily.md"
+			else
+				filename = "daily_" .. date .. ".md"
+			end
+			local full_path = dir_path .. "/" .. filename
+
+			-- If the daily note doesn't exist, create it
+			if vim.fn.filereadable(full_path) == 0 then
+				local legacy_path = config.notes_dir .. "/" .. date .. ".md"
+				if vim.fn.filereadable(legacy_path) == 1 then
+					full_path = legacy_path
+				else
+					create_daily_note_at_path(full_path, dir_path, date)
+				end
+			end
+
+			-- Read daily note lines to locate target section
+			local file_lines = {}
+			local r_file = io.open(full_path, "r")
+			if r_file then
+				for line in r_file:lines() do
+					table.insert(file_lines, line)
+				end
+				r_file:close()
+			end
+
+			local heading_idx = nil
+			-- Search patterns: "## Tasks / Notes", "## Tasks", "## Notes" (case-insensitive)
+			local patterns = {
+				"^##+%s+.*[Tt]asks%s*/%s*[Nn]otes",
+				"^##+%s+.*[Tt]asks",
+				"^##+%s+.*[Nn]otes",
+			}
+			for _, pat in ipairs(patterns) do
+				for i, line in ipairs(file_lines) do
+					if line:match(pat) then
+						heading_idx = i
+						break
+					end
+				end
+				if heading_idx then
+					break
+				end
+			end
+
+			local insert_idx
+			if heading_idx then
+				-- Find the next heading of any level
+				insert_idx = #file_lines + 1
+				for i = heading_idx + 1, #file_lines do
+					if file_lines[i]:match("^#+%s+") then
+						insert_idx = i
+						break
+					end
+				end
+
+				-- Trim trailing empty lines within the target section
+				while insert_idx > heading_idx + 1 and vim.trim(file_lines[insert_idx - 1]) == "" do
+					insert_idx = insert_idx - 1
+				end
+			else
+				-- Fallback to the absolute end of the file
+				insert_idx = #file_lines + 1
+			end
+
+			-- Insert cleaned lines
+			for _, line in ipairs(cleaned_lines) do
+				table.insert(file_lines, insert_idx, line)
+				insert_idx = insert_idx + 1
+			end
+
+			-- Write the updated contents back to the daily note
+			local w_file = io.open(full_path, "w")
+			if w_file then
+				for _, line in ipairs(file_lines) do
+					w_file:write(line .. "\n")
+				end
+				w_file:close()
+				vim.notify("Note captured to today's daily note.", vim.log.levels.INFO)
+				require("notes.git").commit("quick capture")
+			else
+				vim.notify("Could not write daily note: " .. full_path, vim.log.levels.ERROR)
+			end
+		else
+			vim.notify("Quick capture cancelled: empty text", vim.log.levels.WARN)
+		end
+	end
+
+	local function cancel()
+		close()
+		vim.notify("Quick capture cancelled", vim.log.levels.INFO)
+	end
+
+	-- Keymaps inside the capture buffer
+	vim.keymap.set({ "n", "i" }, "<C-s>", submit, { buffer = buf, silent = true })
+	vim.keymap.set("n", "<CR>", submit, { buffer = buf, silent = true })
+	vim.keymap.set("n", "q", cancel, { buffer = buf, silent = true })
+	vim.keymap.set("n", "<Esc>", cancel, { buffer = buf, silent = true })
+end
+
+-- Insert TOC markers at the cursor line and generate the TOC
+M.insert_toc = function()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local cursor = vim.api.nvim_win_get_cursor(0)
+	local row = cursor[1] -- 1-based line number (insert below this line)
+
+	local markers = {
+		"<!-- TOC -->",
+		"<!-- /TOC -->"
+	}
+
+	vim.api.nvim_buf_set_lines(bufnr, row, row, false, markers)
+	
+	-- Populate the TOC immediately
+	require("notes.toc").update_toc(bufnr)
+
+	-- Place cursor inside the inserted TOC block
+	pcall(vim.api.nvim_win_set_cursor, 0, { row + 2, 0 })
+	vim.notify("Table of Contents markers inserted", vim.log.levels.INFO)
+end
+
+-- Interactive document outline picker using Telescope
+M.outline = function()
+	local bufnr = vim.api.nvim_get_current_buf()
+	local headings = require("notes.toc").parse_headings(bufnr)
+	if #headings == 0 then
+		vim.notify("No headings found in the current note.", vim.log.levels.INFO)
+		return
+	end
+
+	local displayer = entry_display.create({
+		separator = " ",
+		items = {
+			{ width = 60 }, -- Heading text with indent
+			{ remaining = true }, -- Line number/metadata
+		},
+	})
+
+	local make_display = function(entry)
+		local heading = entry.heading
+		local indent = string.rep("  ", heading.level - 1)
+		local prefix = "󰉫 "
+		if heading.level == 1 then
+			prefix = " "
+		elseif heading.level == 2 then
+			prefix = "󰉬 "
+		elseif heading.level == 3 then
+			prefix = "󰉭 "
+		end
+
+		local hl = "TelescopeResultsNormal"
+		if heading.level == 1 then
+			hl = "TelescopeResultsTitle"
+		end
+
+		return displayer({
+			{ indent .. prefix .. heading.text, hl },
+			{ "L" .. heading.lnum, "Comment" },
+		})
+	end
+
+	pickers.new({}, {
+		prompt_title = "Document Outline (TOC)",
+		sorting_strategy = "ascending",
+		layout_config = {
+			prompt_position = "top",
+		},
+		finder = finders.new_table({
+			results = headings,
+			entry_maker = function(heading)
+				return {
+					value = heading.lnum,
+					display = make_display,
+					ordinal = heading.text,
+					heading = heading,
+				}
+			end,
+		}),
+		sorter = conf.generic_sorter({}),
+		previewer = previewers.new_buffer_previewer({
+			title = "Section Preview",
+			define_preview = function(self, entry, status)
+				local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+				vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+				vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+				-- Scroll preview window to the selected heading line
+				pcall(vim.api.nvim_win_set_cursor, self.state.winid, { entry.heading.lnum, 0 })
+			end,
+		}),
+		attach_mappings = function(prompt_bufnr, map)
+			actions.select_default:replace(function()
+				actions.close(prompt_bufnr)
+				local selection = action_state.get_selected_entry()
+				if selection then
+					pcall(vim.api.nvim_win_set_cursor, 0, { selection.value, 0 })
+				end
+			end)
+			return true
+		end,
+	}):find()
+end
+
+M.choose_icon = function()
+	local active_buf = vim.api.nvim_get_current_buf()
+	local filepath = vim.api.nvim_buf_get_name(active_buf)
+	local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+	if ext ~= "md" then
+		vim.notify("Can only choose icons for Markdown notes.", vim.log.levels.ERROR)
+		return
+	end
+
+	local icons_list = {
+		{ icon = "📝", name = "Note / Document" },
+		{ icon = "📓", name = "Journal / Personal" },
+		{ icon = "📔", name = "Diary / Log" },
+		{ icon = "📚", name = "Book / Reference" },
+		{ icon = "📋", name = "Clipboard / Task list" },
+		{ icon = "✅", name = "Done / Complete" },
+		{ icon = "⚠️", name = "Warning / Caution" },
+		{ icon = "🚨", name = "Alert / Urgent" },
+		{ icon = "❓", name = "Question / Query" },
+		{ icon = "🎯", name = "Target / Goal" },
+		{ icon = "⭐", name = "Star / Favorite" },
+		{ icon = "🧠", name = "Brain / Thoughts" },
+		{ icon = "💭", name = "Thought / Reflection" },
+		{ icon = "💡", name = "Idea / Brainstorm" },
+		{ icon = "💬", name = "Comment / Chat" },
+		{ icon = "📌", name = "Pin / Reference" },
+		{ icon = "📅", name = "Calendar / Schedule" },
+		{ icon = "⏰", name = "Reminder / Alarm" },
+		{ icon = "⏳", name = "Wait / Defer" },
+		{ icon = "🔗", name = "Link / Connection" },
+		{ icon = "📥", name = "Inbox / Backlog" },
+		{ icon = "📤", name = "Outbox / Export" },
+		{ icon = "🔍", name = "Search / Inspect" },
+		{ icon = "🔥", name = "Fire / Hot / Priority" },
+		{ icon = "🚀", name = "Launch / Release" },
+		{ icon = "🐛", name = "Bug / Issue" },
+		{ icon = "🔒", name = "Security / Lock" },
+		{ icon = "🛠️", name = "Tool / Refactor" },
+		{ icon = "🎨", name = "Design / Style" },
+		{ icon = "🧪", name = "Test / Experiment" },
+		{ icon = "📦", name = "Package / Dependency" },
+		{ icon = "🏷️", name = "Tag / Topic" },
+		{ icon = "📈", name = "Chart / Progress" },
+		{ icon = "💻", name = "Code / Dev" },
+		{ icon = "🚧", name = "WIP / Construction" },
+		-- Nerd Font Icons
+		{ icon = "", name = "Nerd: Flame" },
+		{ icon = "", name = "Nerd: Bug" },
+		{ icon = "󰓅", name = "Nerd: Idea" },
+		{ icon = "󰃭", name = "Nerd: Calendar" },
+		{ icon = "󰄬", name = "Nerd: Check" },
+		{ icon = "󰅶", name = "Nerd: Shield" },
+		{ icon = "󰆍", name = "Nerd: Terminal" },
+		{ icon = "󰙨", name = "Nerd: Lab" },
+		{ icon = "󰏗", name = "Nerd: Package" },
+		{ icon = "󰓎", name = "Nerd: Star" },
+		{ icon = "󰀪", name = "Nerd: Warning" },
+		{ icon = "󰂚", name = "Nerd: Alert / Bell" },
+		{ icon = "󰘥", name = "Nerd: Question" },
+		{ icon = "󰓾", name = "Nerd: Target" },
+		{ icon = "󰄽", name = "Nerd: Brain" },
+		{ icon = "󰆧", name = "Nerd: Book / Journal" },
+		{ icon = "󰌷", name = "Nerd: Link" },
+		{ icon = "󰄉", name = "Nerd: Clock" },
+		{ icon = "󰈞", name = "Nerd: Search" },
+		{ icon = "󰏊", name = "Nerd: Clipboard" },
+		-- Special actions
+		{ icon = "", name = "[None / Clear Icon]" },
+		{ icon = "CUSTOM", name = "[Enter custom icon...]" },
+	}
+
+	local displayer = entry_display.create({
+		separator = " | ",
+		items = {
+			{ width = 4 }, -- Icon
+			{ width = 30 }, -- Name
+		},
+	})
+
+	local function make_display(entry)
+		local icon_str = entry.value.icon
+		if icon_str == "CUSTOM" then
+			icon_str = "⌨️"
+		elseif icon_str == "" then
+			icon_str = "∅"
+		end
+		local formatted = displayer({
+			icon_str,
+			entry.value.name,
+		})
+		return "| " .. formatted .. " |"
+	end
+
+	local function insert_icon(icon)
+		if icon ~= "" then
+			vim.api.nvim_put({ icon }, "c", true, true)
+		end
+	end
+
+	pickers.new({}, {
+		prompt_title = "Choose Note Icon",
+		finder = finders.new_table({
+			results = icons_list,
+			entry_maker = function(item)
+				return {
+					value = item,
+					display = make_display,
+					ordinal = item.name,
+				}
+			end,
+		}),
+		sorter = conf.generic_sorter({}),
+		attach_mappings = function(prompt_bufnr, map)
+			actions.select_default:replace(function()
+				actions.close(prompt_bufnr)
+				local selection = action_state.get_selected_entry()
+				if selection then
+					local item = selection.value
+					if item.icon == "CUSTOM" then
+						vim.ui.input({ prompt = "Enter custom icon (emoji or character): " }, function(input)
+							if input and input ~= "" then
+								insert_icon(input)
+							end
+						end)
+					else
+						insert_icon(item.icon)
+					end
+				end
+			end)
+			return true
+		end,
+	}):find()
 end
 
 return M
