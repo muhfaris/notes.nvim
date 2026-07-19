@@ -115,6 +115,73 @@ summary: ""
 
 ## References
 ]],
+		release = [[---
+title: "Release: %TITLE%"
+date: "%DATE%"
+tags: ["release"]
+summary: ""
+---
+
+# Release: %TITLE%
+
+## Overview
+
+## Added
+
+## Changed
+
+## Fixed
+
+## Removed
+
+## Deployment / Migration Notes
+]],
+		documentation = [[---
+title: "Documentation: %TITLE%"
+date: "%DATE%"
+tags: ["documentation"]
+summary: ""
+---
+
+# Documentation: %TITLE%
+
+## Overview
+
+## Usage / Quick Start
+
+## Architecture / Design
+
+## API Reference
+
+## Configuration
+
+## Examples
+]],
+		job_application = [[---
+title: "Job Application: %TITLE%"
+date: "%DATE%"
+tags: ["job-application", "career"]
+summary: ""
+---
+
+# Job Application: %TITLE%
+
+## Company Profile
+
+## Role / Job Description
+
+## Status
+- [ ] Applied
+- [ ] Technical Test
+- [ ] Interview
+- [ ] Offered / Rejected
+
+## Key Contacts
+
+## Notes / Preparation
+
+## Follow-up Timeline
+]],
 	},
 	keymaps = {
 		n = {
@@ -128,6 +195,7 @@ summary: ""
 			["<leader>nto"] = "outline",
 			["<leader>ntc"] = "insert_toc",
 			["<leader>ni"] = "choose_icon",
+			["<leader>nb"] = "backlinks",
 		},
 	},
 	key_desc = {
