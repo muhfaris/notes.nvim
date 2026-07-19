@@ -15,6 +15,12 @@ local previewers = require("telescope.previewers")
 local EXPLORER_BUF_NAME = "notes://explorer"
 local copied_note_path = nil
 
+local function attach_markview(bufnr)
+	-- markview.nvim handles its own rendering via autocmds
+	-- This function is kept for backwards compatibility
+end
+M.attach_markview = attach_markview
+
 -- Helper to open a note buffer based on the editor_style setting (current vs float)
 local function open_note_buffer(filepath, target_line)
 	local buf = vim.fn.bufadd(filepath)
@@ -79,6 +85,13 @@ local function open_note_buffer(filepath, target_line)
 
 		local win = vim.api.nvim_open_win(buf, true, win_opts)
 
+		-- Force markview to do a complete render (workaround for partial conceal on first paint)
+		if package.loaded["markview"] then
+			local mv = require("markview").strict_render
+			mv:clear(buf)
+			mv:render(buf)
+		end
+
 		-- Wrap lines and show numbers in the floating note window
 		vim.api.nvim_set_option_value("wrap", true, { win = win })
 		vim.api.nvim_set_option_value("linebreak", true, { win = win })
@@ -87,7 +100,12 @@ local function open_note_buffer(filepath, target_line)
 		vim.api.nvim_set_option_value("relativenumber", false, { win = win })
 
 		-- Buffer-local shortcut 'q' to save and close the float modal
-		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Float" })
+		vim.keymap.set(
+			"n",
+			"q",
+			"<cmd>w<CR><cmd>close<CR>",
+			{ buffer = buf, silent = true, desc = "Save and Close Note Float" }
+		)
 
 		-- Move to tab
 		vim.keymap.set("n", "<C-g>t", function()
@@ -95,7 +113,12 @@ local function open_note_buffer(filepath, target_line)
 			vim.cmd("close")
 			vim.cmd("tabnew")
 			vim.api.nvim_win_set_buf(0, buf)
-			vim.keymap.set("n", "q", "<cmd>w<CR><cmd>tabclose<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Tab" })
+			vim.keymap.set(
+				"n",
+				"q",
+				"<cmd>w<CR><cmd>tabclose<CR>",
+				{ buffer = buf, silent = true, desc = "Save and Close Note Tab" }
+			)
 		end, { buffer = buf, silent = true, desc = "Move Note from Float to Tab" })
 
 		-- Move to editor (normal buffer)
@@ -108,15 +131,30 @@ local function open_note_buffer(filepath, target_line)
 	elseif config.editor_style == "tab" then
 		vim.cmd("tabnew")
 		vim.api.nvim_win_set_buf(0, buf)
-		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>tabclose<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Tab" })
+		vim.keymap.set(
+			"n",
+			"q",
+			"<cmd>w<CR><cmd>tabclose<CR>",
+			{ buffer = buf, silent = true, desc = "Save and Close Note Tab" }
+		)
 	elseif config.editor_style == "split" then
 		vim.cmd("split")
 		vim.api.nvim_win_set_buf(0, buf)
-		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Split" })
+		vim.keymap.set(
+			"n",
+			"q",
+			"<cmd>w<CR><cmd>close<CR>",
+			{ buffer = buf, silent = true, desc = "Save and Close Note Split" }
+		)
 	elseif config.editor_style == "vsplit" then
 		vim.cmd("vsplit")
 		vim.api.nvim_win_set_buf(0, buf)
-		vim.keymap.set("n", "q", "<cmd>w<CR><cmd>close<CR>", { buffer = buf, silent = true, desc = "Save and Close Note Split" })
+		vim.keymap.set(
+			"n",
+			"q",
+			"<cmd>w<CR><cmd>close<CR>",
+			{ buffer = buf, silent = true, desc = "Save and Close Note Split" }
+		)
 	else
 		-- Traditional: open in the current window
 		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
@@ -129,22 +167,6 @@ local function open_note_buffer(filepath, target_line)
 		pcall(vim.api.nvim_win_set_cursor, 0, { target_line, 0 })
 	end
 end
-
-
-local months_names = {
-	["01"] = "January",
-	["02"] = "February",
-	["03"] = "March",
-	["04"] = "April",
-	["05"] = "May",
-	["06"] = "June",
-	["07"] = "July",
-	["08"] = "August",
-	["09"] = "September",
-	["10"] = "October",
-	["11"] = "November",
-	["12"] = "December",
-}
 
 -- Function to truncate text and add ellipsis
 local function truncate(text, width)
@@ -226,7 +248,8 @@ local function create_daily_note_at_path(full_path, dir_path, date_str)
 
 	local time = os.date(config.time_format)
 	local title = "Daily Note: " .. date_str
-	local template = (config.daily_template and config.daily_template ~= "") and config.daily_template or config.template
+	local template = (config.daily_template and config.daily_template ~= "") and config.daily_template
+		or config.template
 	template = template:gsub("%%TITLE%%", title)
 	template = template:gsub("%%DATE%%", date_str .. " " .. time)
 	template = template:gsub("tags:%s*%[%s*%]", 'tags: ["daily"]')
@@ -363,6 +386,12 @@ M.new_note = function(title)
 		if desc_line == 0 then
 			desc_line = vim.fn.search("^## Attendees")
 		end
+		if desc_line == 0 then
+			desc_line = vim.fn.search("^## Overview")
+		end
+		if desc_line == 0 then
+			desc_line = vim.fn.search("^## Company Profile")
+		end
 		if desc_line > 0 then
 			pcall(vim.api.nvim_win_set_cursor, 0, { desc_line + 1, 0 })
 		end
@@ -379,25 +408,53 @@ M.new_note = function(title)
 		end
 	end
 
+	local all_templates = {}
 	if config.templates and type(config.templates) == "table" then
-		local keys = {}
-		for k, _ in pairs(config.templates) do
-			table.insert(keys, k)
+		for k, v in pairs(config.templates) do
+			all_templates[k] = { type = "config", content = v }
 		end
-		if config.daily_template and not config.templates.daily then
-			table.insert(keys, "daily")
-		end
-		table.sort(keys)
+	end
+	if config.daily_template and not all_templates.daily then
+		all_templates.daily = { type = "config", content = config.daily_template }
+	end
 
-		local function get_template_content(name)
-			if name == "daily" and not config.templates.daily then
-				return config.daily_template
+	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+	local templates_dir = notes_dir .. "/templates"
+	if vim.fn.isdirectory(templates_dir) == 1 then
+		local files = vim.fn.globpath(templates_dir, "*.md", false, true)
+		for _, file_path in ipairs(files) do
+			local name = vim.fn.fnamemodify(file_path, ":t:r")
+			all_templates[name] = { type = "file", path = file_path }
+		end
+	end
+
+	local keys = {}
+	for k, _ in pairs(all_templates) do
+		table.insert(keys, k)
+	end
+	table.sort(keys)
+
+	local function get_template_content(name)
+		local t = all_templates[name]
+		if not t then
+			return nil
+		end
+		if t.type == "config" then
+			return t.content
+		elseif t.type == "file" then
+			local f = io.open(t.path, "r")
+			if f then
+				local content = f:read("*all")
+				f:close()
+				return content
 			end
-			return config.templates[name]
 		end
+		return nil
+	end
 
-		if #keys > 1 then
-			pickers.new({}, {
+	if #keys > 1 then
+		pickers
+			.new({}, {
 				prompt_title = "Select Note Template",
 				finder = finders.new_table({
 					results = keys,
@@ -412,6 +469,7 @@ M.new_note = function(title)
 							local lines = vim.split(template_content, "\n")
 							vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
 							vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+							attach_markview(self.state.bufnr)
 						end
 					end,
 				}),
@@ -426,12 +484,12 @@ M.new_note = function(title)
 					end)
 					return true
 				end,
-			}):find()
-			return
-		elseif #keys == 1 then
-			get_title_and_create(get_template_content(keys[1]))
-			return
-		end
+			})
+			:find()
+		return
+	elseif #keys == 1 then
+		get_title_and_create(get_template_content(keys[1]))
+		return
 	end
 
 	get_title_and_create(config.template)
@@ -493,33 +551,37 @@ end
 
 -- API to list all incomplete tasks across notes
 M.list_tasks = function()
-	local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
+	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+	local notes = vim.fn.globpath(notes_dir, "**/*.md", false, true)
 	local tasks = {}
 
 	for _, note_path in ipairs(notes) do
-		local file = io.open(note_path, "r")
-		if file then
-			local lnum = 1
-			local title = vim.fn.fnamemodify(note_path, ":t:r")
-			local metadata = parser.read_file(note_path)
-			if metadata and metadata.title and metadata.title ~= "" then
-				title = metadata.title
-			end
-
-			for line in file:lines() do
-				local task_text = line:match("^%s*%- %[ %]%s*(.*)")
-				if task_text and task_text ~= "" then
-					table.insert(tasks, {
-						path = note_path,
-						title = title,
-						lnum = lnum,
-						text = task_text,
-						line = line,
-					})
+		local rel_path = note_path:sub(#notes_dir + 2):gsub("\\", "/")
+		if rel_path:sub(1, 10) ~= "templates/" then
+			local file = io.open(note_path, "r")
+			if file then
+				local lnum = 1
+				local title = vim.fn.fnamemodify(note_path, ":t:r")
+				local metadata = parser.read_file(note_path)
+				if metadata and metadata.title and metadata.title ~= "" then
+					title = metadata.title
 				end
-				lnum = lnum + 1
+
+				for line in file:lines() do
+					local task_text = line:match("^%s*%- %[ %]%s*(.*)")
+					if task_text and task_text ~= "" then
+						table.insert(tasks, {
+							path = note_path,
+							title = title,
+							lnum = lnum,
+							text = task_text,
+							line = line,
+						})
+					end
+					lnum = lnum + 1
+				end
+				file:close()
 			end
-			file:close()
 		end
 	end
 
@@ -543,36 +605,57 @@ M.list_tasks = function()
 		})
 	end
 
-	pickers.new({}, {
-		prompt_title = "Incomplete Tasks",
-		finder = finders.new_table({
-			results = tasks,
-			entry_maker = function(entry)
-				return {
-					value = entry.path,
-					display = make_display,
-					ordinal = entry.title .. " " .. entry.text,
-					lnum = entry.lnum,
-					col = 1,
-					filename = entry.path,
-					title = entry.title,
-					text = entry.text,
-				}
+	pickers
+		.new({}, {
+			prompt_title = "Incomplete Tasks",
+			finder = finders.new_table({
+				results = tasks,
+				entry_maker = function(entry)
+					return {
+						value = entry.path,
+						display = make_display,
+						ordinal = entry.title .. " " .. entry.text,
+						lnum = entry.lnum,
+						col = 1,
+						filename = entry.path,
+						title = entry.title,
+						text = entry.text,
+					}
+				end,
+			}),
+			sorter = conf.generic_sorter({}),
+			previewer = previewers.new_buffer_previewer({
+				define_preview = function(self, entry, status)
+					local filepath = entry.value
+					if filepath and vim.fn.filereadable(filepath) == 1 then
+						local lines = vim.fn.readfile(filepath)
+						vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+						local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+						if ext == "md" then
+							vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+							if package.loaded["markview"] then
+								vim.schedule(function()
+									local mv = require("markview").strict_render
+									mv:clear(self.state.bufnr)
+									mv:render(self.state.bufnr)
+								end)
+							end
+						end
+					end
+				end,
+			}),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selection = action_state.get_selected_entry()
+					if selection then
+						open_note_buffer(selection.value, selection.lnum)
+					end
+				end)
+				return true
 			end,
-		}),
-		sorter = conf.generic_sorter({}),
-		previewer = conf.file_previewer({}),
-		attach_mappings = function(prompt_bufnr, map)
-			actions.select_default:replace(function()
-				actions.close(prompt_bufnr)
-				local selection = action_state.get_selected_entry()
-				if selection then
-					open_note_buffer(selection.value, selection.lnum)
-				end
-			end)
-			return true
-		end,
-	}):find()
+		})
+		:find()
 end
 
 --- Built-in omnifunc completion handler for wiki-links
@@ -589,74 +672,87 @@ M.omnifunc = function(findstart, base)
 		end
 		return -1
 	else
-		local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
+		local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+		local notes = vim.fn.globpath(notes_dir, "**/*.md", false, true)
 		local matches = {}
 		local base_lower = base:lower()
 
 		for _, note_path in ipairs(notes) do
-			local filename = vim.fn.fnamemodify(note_path, ":t:r")
-			local rel_path = note_path:sub(#config.notes_dir + 2):gsub("%.md$", ""):gsub("\\", "/")
-			local is_daily = false
-			local dy, dm, dd = note_path:match("(%d%d%d%d)/(%d%d)/(%d%d)/daily%.md$")
-			if not dy then
-				dy, dm, dd = note_path:match("(%d%d%d%d)%-%(%d%d)%-%(%d%d)%.md$")
-			end
-
-			local metadata = parser.read_file(note_path)
-
-			if dy and dm and dd then
-				is_daily = true
-				local date_str = string.format("%s-%s-%s", dy, dm, dd)
-				local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title or ("Daily Note: " .. date_str)
-
-				-- Suggest by pretty daily title (e.g. "Daily Note: 2026-07-14")
-				if base == "" or title:lower():find(base_lower, 1, true) then
-					table.insert(matches, {
-						word = title .. "]]",
-						abbr = title,
-						menu = "[Daily Note]",
-					})
+			local rel_path = note_path:sub(#notes_dir + 2):gsub("%.md$", ""):gsub("\\", "/")
+			if rel_path:sub(1, 10) ~= "templates/" then
+				local filename = vim.fn.fnamemodify(note_path, ":t:r")
+				local is_daily = false
+				local dy, dm, dd = note_path:match("(%d%d%d%d)/(%d%d)/(%d%d)/daily%.md$")
+				if not dy then
+					dy, dm, dd = note_path:match("(%d%d%d%d)%-%(%d%d)%-%(%d%d)%.md$")
 				end
 
-				-- Suggest by date (e.g. "2026-07-14")
-				if base == "" or date_str:lower():find(base_lower, 1, true) then
-					table.insert(matches, {
-						word = title .. "]]",
-						abbr = date_str,
-						menu = "[Daily Date]",
-					})
-				end
-			else
-				local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title or nil
+				local metadata = parser.read_file(note_path)
 
-				-- 1. Suggest by pretty title
-				if title then
-					if base == "" or title:lower():find(base_lower, 1, true) or filename:lower():find(base_lower, 1, true) or rel_path:lower():find(base_lower, 1, true) then
+				if dy and dm and dd then
+					is_daily = true
+					local date_str = string.format("%s-%s-%s", dy, dm, dd)
+					local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title
+						or ("Daily Note: " .. date_str)
+
+					-- Suggest by pretty daily title (e.g. "Daily Note: 2026-07-14")
+					if base == "" or title:lower():find(base_lower, 1, true) then
 						table.insert(matches, {
 							word = title .. "]]",
 							abbr = title,
-							menu = "[Title]",
+							menu = "[Daily Note]",
 						})
 					end
-				end
 
-				-- 2. Suggest by relative path
-				if base == "" or rel_path:lower():find(base_lower, 1, true) or filename:lower():find(base_lower, 1, true) then
-					table.insert(matches, {
-						word = (title or rel_path) .. "]]",
-						abbr = rel_path,
-						menu = "[Path]",
-					})
-				end
-
-				-- 3. Suggest by filename (if different from rel_path and title)
-				if filename ~= rel_path and (not title or filename ~= title) then
-					if base == "" or filename:lower():find(base_lower, 1, true) then
+					-- Suggest by date (e.g. "2026-07-14")
+					if base == "" or date_str:lower():find(base_lower, 1, true) then
 						table.insert(matches, {
-							word = (title or filename) .. "]]",
-							abbr = filename,
-							menu = "[Note]",
+							word = title .. "]]",
+							abbr = date_str,
+							menu = "[Daily Date]",
 						})
+					end
+				else
+					local title = (metadata and metadata.title and metadata.title ~= "") and metadata.title or nil
+
+					-- 1. Suggest by pretty title
+					if title then
+						if
+							base == ""
+							or title:lower():find(base_lower, 1, true)
+							or filename:lower():find(base_lower, 1, true)
+							or rel_path:lower():find(base_lower, 1, true)
+						then
+							table.insert(matches, {
+								word = title .. "]]",
+								abbr = title,
+								menu = "[Title]",
+							})
+						end
+					end
+
+					-- 2. Suggest by relative path
+					if
+						base == ""
+						or rel_path:lower():find(base_lower, 1, true)
+						or filename:lower():find(base_lower, 1, true)
+					then
+						table.insert(matches, {
+							word = (title or rel_path) .. "]]",
+							abbr = rel_path,
+							menu = "[Path]",
+						})
+					end
+
+					-- 3. Suggest by filename (if different from rel_path and title)
+					if filename ~= rel_path and (not title or filename ~= title) then
+						if base == "" or filename:lower():find(base_lower, 1, true) then
+							table.insert(matches, {
+								word = (title or filename) .. "]]",
+								abbr = filename,
+								menu = "[Note]",
+							})
+						end
 					end
 				end
 			end
@@ -666,10 +762,65 @@ M.omnifunc = function(findstart, base)
 end
 
 -- API to follow wiki-links
+local function open_url(url)
+	-- Validate URL before dispatching
+	local trimmed = vim.trim(url or "")
+	if trimmed == "" then
+		return false
+	end
+
+	local scheme = trimmed:match("^([a-zA-Z][a-zA-Z0-9+%-]*)://")
+	if not scheme then
+		return false
+	end
+
+	if scheme == "file" then
+		-- file:// protocol: open in Neovim
+		local filepath = trimmed:gsub("^file://", "")
+		if vim.fn.filereadable(filepath) == 1 then
+			open_note_buffer(filepath)
+			return true
+		end
+		vim.notify("File not found: " .. filepath, vim.log.levels.WARN)
+		return true
+	end
+
+	-- All other protocols (http, https, ftp, mailto, etc.): open with system handler
+	if vim.ui.open then
+		vim.ui.open(trimmed)
+	else
+		local opener = "xdg-open"
+		if vim.fn.has("macunix") == 1 then
+			opener = "open"
+		elseif vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1 then
+			opener = "start"
+		end
+		vim.fn.jobstart({ opener, trimmed }, { detach = true })
+	end
+	vim.notify("Opening: " .. trimmed, vim.log.levels.INFO)
+	return true
+end
+
 M.follow_wiki_link = function()
 	local line = vim.api.nvim_get_current_line()
 	local col = vim.api.nvim_win_get_cursor(0)[2] + 1
 
+	-- First, check for standard markdown links: [text](url)
+	local md_start = 1
+	while true do
+		local s, e, link_text, link_url = line:find("%[([^%]]-)%]%(([^)]-)%)", md_start)
+		if not s then
+			break
+		end
+		if col >= s and col <= e then
+			if open_url(link_url) then
+				return
+			end
+		end
+		md_start = e + 1
+	end
+
+	-- Then check for wiki-links: [[Link]]
 	local start_idx = 1
 	local link_title = nil
 	while true do
@@ -709,7 +860,8 @@ M.follow_wiki_link = function()
 		if target_daily_path then
 			open_note_buffer(target_daily_path)
 		else
-			local confirm = vim.fn.confirm("Daily Note '" .. link_title .. "' does not exist. Create it?", "&Yes\n&No", 1)
+			local confirm =
+				vim.fn.confirm("Daily Note '" .. link_title .. "' does not exist. Create it?", "&Yes\n&No", 1)
 			if confirm == 1 then
 				local dir_path = string.format("%s/%s/%s/%s", config.notes_dir, yyyy, mm, dd)
 				if vim.fn.isdirectory(dir_path) == 0 then
@@ -736,7 +888,7 @@ M.follow_wiki_link = function()
 	local normalized_link = link_title:gsub("\\", "/"):gsub("^/+", ""):gsub("/+$", "")
 	local sanitized_link = utils.sanitize_title(link_title)
 	local collapsed_sanitized_link = sanitized_link:gsub("-+", "-")
-	
+
 	local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
 	local target_path = nil
 
@@ -766,10 +918,12 @@ M.follow_wiki_link = function()
 		for _, note in ipairs(notes) do
 			local filename = vim.fn.fnamemodify(note, ":t:r")
 			local collapsed_filename = filename:gsub("-+", "-")
-			if filename:lower() == normalized_link:lower()
+			if
+				filename:lower() == normalized_link:lower()
 				or filename == sanitized_link
 				or collapsed_filename == collapsed_sanitized_link
-				or filename:match("^" .. vim.pesc(sanitized_link) .. "_") then
+				or filename:match("^" .. vim.pesc(sanitized_link) .. "_")
+			then
 				target_path = note
 				break
 			end
@@ -874,7 +1028,26 @@ local function show_notes_picker(prompt_title, results, on_delete_callback)
 				end,
 			}),
 			sorter = conf.generic_sorter({}),
-			previewer = conf.file_previewer({}),
+			previewer = previewers.new_buffer_previewer({
+				define_preview = function(self, entry, status)
+					local filepath = entry.value
+					if filepath and vim.fn.filereadable(filepath) == 1 then
+						local lines = vim.fn.readfile(filepath)
+						vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+						local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+						if ext == "md" then
+							vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+							if package.loaded["markview"] then
+								vim.schedule(function()
+									local mv = require("markview").strict_render
+									mv:clear(self.state.bufnr)
+									mv:render(self.state.bufnr)
+								end)
+							end
+						end
+					end
+				end,
+			}),
 			layout_config = {
 				height = 0.8,
 				width = 0.9,
@@ -919,24 +1092,28 @@ end
 
 -- API to list notes using Telescope
 M.list_notes = function()
-	local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
+	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+	local notes = vim.fn.globpath(notes_dir, "**/*.md", false, true)
 	local results = {}
 
 	for _, note_path in ipairs(notes) do
-		local metadata, _ = parser.read_file(note_path)
-		if metadata then
-			local date = metadata.date or ""
-			if date == "" then
-				local mtime = vim.fn.getftime(note_path)
-				date = os.date("%Y-%m-%d %H:%M:%S", mtime)
+		local rel_path = note_path:sub(#notes_dir + 2):gsub("\\", "/")
+		if rel_path:sub(1, 10) ~= "templates/" then
+			local metadata, _ = parser.read_file(note_path)
+			if metadata then
+				local date = metadata.date or ""
+				if date == "" then
+					local mtime = vim.fn.getftime(note_path)
+					date = os.date("%Y-%m-%d %H:%M:%S", mtime)
+				end
+				table.insert(results, {
+					path = note_path,
+					title = metadata.title or vim.fn.fnamemodify(note_path, ":t:r"),
+					date = date,
+					tags = metadata.tags or {},
+					summary = metadata.summary or "",
+				})
 			end
-			table.insert(results, {
-				path = note_path,
-				title = metadata.title or vim.fn.fnamemodify(note_path, ":t:r"),
-				date = date,
-				tags = metadata.tags or {},
-				summary = metadata.summary or "",
-			})
 		end
 	end
 
@@ -949,9 +1126,11 @@ end
 
 -- API to live grep content inside notes
 M.search_notes = function()
+	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
 	require("telescope.builtin").live_grep({
 		prompt_title = "Search Note Contents",
-		search_dirs = { config.notes_dir },
+		search_dirs = { notes_dir },
+		file_ignore_patterns = { "templates/" },
 	})
 end
 
@@ -1040,12 +1219,23 @@ M.render_explorer = function(buf)
 			if not name:match("^%.") then
 				local abs_path = current_dir .. "/" .. name
 				if vim.fn.isdirectory(abs_path) == 1 then
-					table.insert(dirs, { name = name, path = abs_path })
+					local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+					if abs_path ~= notes_dir .. "/templates" then
+						table.insert(dirs, { name = name, path = abs_path })
+					end
 				else
 					local ext = name:match("%.([^%.]+)$")
 					if ext then
 						ext = ext:lower()
-						if ext == "md" or ext == "png" or ext == "jpg" or ext == "jpeg" or ext == "webp" or ext == "gif" or ext == "svg" then
+						if
+							ext == "md"
+							or ext == "png"
+							or ext == "jpg"
+							or ext == "jpeg"
+							or ext == "webp"
+							or ext == "gif"
+							or ext == "svg"
+						then
 							table.insert(files, { name = name, path = abs_path })
 						end
 					end
@@ -1053,8 +1243,12 @@ M.render_explorer = function(buf)
 			end
 		end
 
-		table.sort(dirs, function(a, b) return a.name < b.name end)
-		table.sort(files, function(a, b) return a.name < b.name end)
+		table.sort(dirs, function(a, b)
+			return a.name < b.name
+		end)
+		table.sort(files, function(a, b)
+			return a.name < b.name
+		end)
 
 		-- Render directories
 		for _, d in ipairs(dirs) do
@@ -1072,8 +1266,14 @@ M.render_explorer = function(buf)
 
 			-- Highlight icon and directory name
 			local start_col = #indent
-			table.insert(highlight_actions, { line = line_idx, hl = icon_hl or "Directory", start_col = start_col, end_col = start_col + #icon })
-			table.insert(highlight_actions, { line = line_idx, hl = "Directory", start_col = start_col + #icon, end_col = -1 })
+			table.insert(
+				highlight_actions,
+				{ line = line_idx, hl = icon_hl or "Directory", start_col = start_col, end_col = start_col + #icon }
+			)
+			table.insert(
+				highlight_actions,
+				{ line = line_idx, hl = "Directory", start_col = start_col + #icon, end_col = -1 }
+			)
 
 			if expanded then
 				traverse(d.path, depth + 1)
@@ -1121,8 +1321,14 @@ M.render_explorer = function(buf)
 
 			-- Highlight file
 			local start_col = #indent
-			table.insert(highlight_actions, { line = line_idx, hl = icon_hl, start_col = start_col, end_col = start_col + #icon })
-			table.insert(highlight_actions, { line = line_idx, hl = "Normal", start_col = start_col + #icon, end_col = -1 })
+			table.insert(
+				highlight_actions,
+				{ line = line_idx, hl = icon_hl, start_col = start_col, end_col = start_col + #icon }
+			)
+			table.insert(
+				highlight_actions,
+				{ line = line_idx, hl = "Normal", start_col = start_col + #icon, end_col = -1 }
+			)
 		end
 	end
 
@@ -1260,7 +1466,10 @@ M.bind_explorer_keys = function(buf, line_to_path)
 		local confirm = vim.fn.confirm("Delete " .. type_str .. " '" .. filename .. "'?", "&Yes\n&No", 2)
 		if confirm == 1 then
 			vim.fn.delete(note_path, "rf")
-			vim.notify((is_dir and "Directory" or (type_str:sub(1, 1):upper() .. type_str:sub(2))) .. " deleted: " .. filename, vim.log.levels.INFO)
+			vim.notify(
+				(is_dir and "Directory" or (type_str:sub(1, 1):upper() .. type_str:sub(2))) .. " deleted: " .. filename,
+				vim.log.levels.INFO
+			)
 			M.render_explorer(buf)
 			require("notes.git").commit("delete " .. type_str .. ": " .. filename)
 		end
@@ -1355,7 +1564,9 @@ M.bind_explorer_keys = function(buf, line_to_path)
 				end
 				vim.notify("Note renamed to: " .. new_filename, vim.log.levels.INFO)
 				M.render_explorer(buf)
-				require("notes.git").commit(string.format("rename note: %s -> %s", vim.fn.fnamemodify(note_path, ":t"), new_filename))
+				require("notes.git").commit(
+					string.format("rename note: %s -> %s", vim.fn.fnamemodify(note_path, ":t"), new_filename)
+				)
 			else
 				vim.notify("Failed to rename note file.", vim.log.levels.ERROR)
 			end
@@ -1526,7 +1737,10 @@ M.bind_explorer_keys = function(buf, line_to_path)
 	end
 
 	local function paste_item()
-		if not copied_note_path or (vim.fn.filereadable(copied_note_path) == 0 and vim.fn.isdirectory(copied_note_path) == 0) then
+		if
+			not copied_note_path
+			or (vim.fn.filereadable(copied_note_path) == 0 and vim.fn.isdirectory(copied_note_path) == 0)
+		then
 			vim.notify("No copied file or directory in clipboard register.", vim.log.levels.WARN)
 			return
 		end
@@ -1900,42 +2114,44 @@ M.list_tags = function()
 		},
 	})
 
-	pickers.new({}, {
-		prompt_title = "Tags List",
-		finder = finders.new_table({
-			results = results,
-			entry_maker = function(entry)
-				return {
-					value = entry.tag,
-					display = function(tbl)
-						return displayer({
-							{ "", "Identifier" },
-							{ tbl.tag, "Normal" },
-							{ string.format("(%d notes)", entry.count), "Comment" },
-						})
-					end,
-					ordinal = entry.tag,
-					tag = entry.tag,
-				}
+	pickers
+		.new({}, {
+			prompt_title = "Tags List",
+			finder = finders.new_table({
+				results = results,
+				entry_maker = function(entry)
+					return {
+						value = entry.tag,
+						display = function(tbl)
+							return displayer({
+								{ "", "Identifier" },
+								{ tbl.tag, "Normal" },
+								{ string.format("(%d notes)", entry.count), "Comment" },
+							})
+						end,
+						ordinal = entry.tag,
+						tag = entry.tag,
+					}
+				end,
+			}),
+			sorter = conf.generic_sorter({}),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selection = action_state.get_selected_entry()
+					if selection then
+						local selected_tag = selection.tag
+						local notes_for_tag = tag_notes[selected_tag] or {}
+						table.sort(notes_for_tag, function(a, b)
+							return (a.date or "") > (b.date or "")
+						end)
+						show_notes_picker("Notes with Tag: " .. selected_tag, notes_for_tag)
+					end
+				end)
+				return true
 			end,
-		}),
-		sorter = conf.generic_sorter({}),
-		attach_mappings = function(prompt_bufnr, map)
-			actions.select_default:replace(function()
-				actions.close(prompt_bufnr)
-				local selection = action_state.get_selected_entry()
-				if selection then
-					local selected_tag = selection.tag
-					local notes_for_tag = tag_notes[selected_tag] or {}
-					table.sort(notes_for_tag, function(a, b)
-						return (a.date or "") > (b.date or "")
-					end)
-					show_notes_picker("Notes with Tag: " .. selected_tag, notes_for_tag)
-				end
-			end)
-			return true
-		end,
-	}):find()
+		})
+		:find()
 end
 
 -- API to find backlinks pointing to the active note buffer
@@ -2292,11 +2508,11 @@ M.insert_toc = function()
 
 	local markers = {
 		"<!-- TOC -->",
-		"<!-- /TOC -->"
+		"<!-- /TOC -->",
 	}
 
 	vim.api.nvim_buf_set_lines(bufnr, row, row, false, markers)
-	
+
 	-- Populate the TOC immediately
 	require("notes.toc").update_toc(bufnr)
 
@@ -2345,45 +2561,48 @@ M.outline = function()
 		})
 	end
 
-	pickers.new({}, {
-		prompt_title = "Document Outline (TOC)",
-		sorting_strategy = "ascending",
-		layout_config = {
-			prompt_position = "top",
-		},
-		finder = finders.new_table({
-			results = headings,
-			entry_maker = function(heading)
-				return {
-					value = heading.lnum,
-					display = make_display,
-					ordinal = heading.text,
-					heading = heading,
-				}
+	pickers
+		.new({}, {
+			prompt_title = "Document Outline (TOC)",
+			sorting_strategy = "ascending",
+			layout_config = {
+				prompt_position = "top",
+			},
+			finder = finders.new_table({
+				results = headings,
+				entry_maker = function(heading)
+					return {
+						value = heading.lnum,
+						display = make_display,
+						ordinal = heading.text,
+						heading = heading,
+					}
+				end,
+			}),
+			sorter = conf.generic_sorter({}),
+			previewer = previewers.new_buffer_previewer({
+				title = "Section Preview",
+				define_preview = function(self, entry, status)
+					local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+					vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
+					vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
+					attach_markview(self.state.bufnr)
+					-- Scroll preview window to the selected heading line
+					pcall(vim.api.nvim_win_set_cursor, self.state.winid, { entry.heading.lnum, 0 })
+				end,
+			}),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selection = action_state.get_selected_entry()
+					if selection then
+						pcall(vim.api.nvim_win_set_cursor, 0, { selection.value, 0 })
+					end
+				end)
+				return true
 			end,
-		}),
-		sorter = conf.generic_sorter({}),
-		previewer = previewers.new_buffer_previewer({
-			title = "Section Preview",
-			define_preview = function(self, entry, status)
-				local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-				vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
-				vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
-				-- Scroll preview window to the selected heading line
-				pcall(vim.api.nvim_win_set_cursor, self.state.winid, { entry.heading.lnum, 0 })
-			end,
-		}),
-		attach_mappings = function(prompt_bufnr, map)
-			actions.select_default:replace(function()
-				actions.close(prompt_bufnr)
-				local selection = action_state.get_selected_entry()
-				if selection then
-					pcall(vim.api.nvim_win_set_cursor, 0, { selection.value, 0 })
-				end
-			end)
-			return true
-		end,
-	}):find()
+		})
+		:find()
 end
 
 M.choose_icon = function()
@@ -2485,39 +2704,41 @@ M.choose_icon = function()
 		end
 	end
 
-	pickers.new({}, {
-		prompt_title = "Choose Note Icon",
-		finder = finders.new_table({
-			results = icons_list,
-			entry_maker = function(item)
-				return {
-					value = item,
-					display = make_display,
-					ordinal = item.name,
-				}
-			end,
-		}),
-		sorter = conf.generic_sorter({}),
-		attach_mappings = function(prompt_bufnr, map)
-			actions.select_default:replace(function()
-				actions.close(prompt_bufnr)
-				local selection = action_state.get_selected_entry()
-				if selection then
-					local item = selection.value
-					if item.icon == "CUSTOM" then
-						vim.ui.input({ prompt = "Enter custom icon (emoji or character): " }, function(input)
-							if input and input ~= "" then
-								insert_icon(input)
-							end
-						end)
-					else
-						insert_icon(item.icon)
+	pickers
+		.new({}, {
+			prompt_title = "Choose Note Icon",
+			finder = finders.new_table({
+				results = icons_list,
+				entry_maker = function(item)
+					return {
+						value = item,
+						display = make_display,
+						ordinal = item.name,
+					}
+				end,
+			}),
+			sorter = conf.generic_sorter({}),
+			attach_mappings = function(prompt_bufnr, map)
+				actions.select_default:replace(function()
+					actions.close(prompt_bufnr)
+					local selection = action_state.get_selected_entry()
+					if selection then
+						local item = selection.value
+						if item.icon == "CUSTOM" then
+							vim.ui.input({ prompt = "Enter custom icon (emoji or character): " }, function(input)
+								if input and input ~= "" then
+									insert_icon(input)
+								end
+							end)
+						else
+							insert_icon(item.icon)
+						end
 					end
-				end
-			end)
-			return true
-		end,
-	}):find()
+				end)
+				return true
+			end,
+		})
+		:find()
 end
 
 return M
