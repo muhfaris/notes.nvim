@@ -128,6 +128,11 @@ M.setup = function(opts)
 
 			-- Configure omnifunc for wiki-link completion
 			vim.bo[ev.buf].omnifunc = "v:lua.require'notes.ui'.omnifunc"
+
+			-- Initial table math refresh
+			pcall(function()
+				require("notes.tablemath").refresh(ev.buf)
+			end)
 		end,
 	})
 
@@ -148,6 +153,23 @@ M.setup = function(opts)
 		end,
 	})
 
+	vim.api.nvim_create_autocmd("User", {
+		group = group,
+		pattern = "TelescopePreviewerLoaded",
+		callback = function(args)
+			if args and args.data and args.data.bufname then
+				local bufname = args.data.bufname
+				if bufname ~= "" then
+					local resolved_name = vim.fn.resolve(vim.fn.fnamemodify(bufname, ":p"))
+					local expanded_notes_dir = vim.fn.resolve(vim.fn.fnamemodify(notes_dir, ":p"))
+					if resolved_name:sub(1, #expanded_notes_dir) == expanded_notes_dir then
+						vim.wo.wrap = true
+					end
+				end
+			end
+		end,
+	})
+
 	vim.api.nvim_create_autocmd("BufWritePre", {
 		group = group,
 		pattern = { pattern_root, pattern_nested },
@@ -155,6 +177,19 @@ M.setup = function(opts)
 			if config.config.auto_toc then
 				require("notes.toc").update_toc(ev.buf)
 			end
+			pcall(function()
+				require("notes.tablemath").refresh(ev.buf)
+			end)
+		end,
+	})
+
+	vim.api.nvim_create_autocmd("InsertLeave", {
+		group = group,
+		pattern = { pattern_root, pattern_nested },
+		callback = function(ev)
+			pcall(function()
+				require("notes.tablemath").refresh(ev.buf)
+			end)
 		end,
 	})
 

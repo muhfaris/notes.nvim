@@ -14,6 +14,8 @@
 - **☑️ Task Checklists**: Easily toggle markdown checkbox items (`- [ ]` / `- [x]`) using `<leader>nt` (buffer-local, fully customizable).
 - **🖼️ Portable Clipboard Image Pasting**: Paste images directly from your clipboard across Linux (X11 & Wayland), macOS, and Windows. Saves files into `notes_dir/images/` and links them with portable relative paths (`images/image.png`).
 - **🔍 Telescope Integration**: Fuzzy find notes by title/tags/date via a clean column-based Telescope list (`:Notes list`), or live grep inside note content (`:Notes search`).
+- **🧮 Markdown Table Math**: Excel-like cell calculation (`=SUM(A1:A3)`, `=AVG(...)`, arithmetic operations) overlaid via non-destructive virtual text. Updates automatically on save and mode changes.
+- **📋 Dynamic Custom Templates**: Merges built-in Lua templates with your custom templates defined as files in `<notes_dir>/templates/`. All template files are excluded from core search, explorer, and autocompletion lists to keep your workspace clean.
 
 ---
 
@@ -97,6 +99,33 @@ When editing markdown files in your `notes_dir`, the plugin automatically activa
 * **Wiki-link Jump (`<CR>`)**: Press `<CR>` while cursor is on `[[Link]]` to navigate to that note.
 * **Task Toggle (`<leader>nt`)**: Toggle checklist state on the current line between `- [ ]` and `- [x]`.
 * **Highlight Toggle (`<leader>nh`)**: Highlight the selected text in visual mode or toggle highlighting on the word under the cursor using `==` tags.
+
+---
+
+## 🧮 Markdown Table Math
+
+`notes.nvim` features an automated Excel-like spreadsheet calculation engine for standard Markdown tables. Formula cells remain fully editable as standard text, and computed values are displayed as non-destructive virtual text next to the cell.
+
+### How it works:
+1. **Coordinate System**:
+   - Columns are lettered (`A`, `B`, `C`...) starting from the leftmost column in the table.
+   - Rows are numbered (`1`, `2`, `3`...) starting from the first data row (header and separator rows are skipped).
+2. **Formulas**:
+   - Begin with `=` (e.g., `=B1*C1`).
+   - Supported math functions: `SUM(range)`, `AVG(range)`, `COUNT(range)`, `MIN(range)`, `MAX(range)` (e.g. `=SUM(D1:D5)`).
+   - Basic arithmetic: `+`, `-`, `*`, `/`, parenthesis `()`, and numbers.
+3. **Execution**:
+   - Formulas evaluate automatically on `InsertLeave` and `BufWritePre` (when saving the file).
+   - Displays clear error hints on invalid inputs (e.g., `⚠️ circular` for circular dependencies, `⚠️ #DIV/0!` for division by zero, `⚠️ #VALUE!` for invalid calculations).
+
+#### Example:
+```markdown
+| Item   | Price | Qty | Total       |
+|--------|-------|-----|-------------|
+| Apple  | 10    | 3   | =B1*C1      |
+| Banana | 20    | 2   | =B2*C2      |
+| Total  |       |     | =SUM(D1:D2) |
+```
 
 ---
 
@@ -266,5 +295,55 @@ require("notes").setup({
 1. **Automatic Saves**: Whenever you write/save a note buffer within your `notes_dir`, the plugin automatically runs `git add -A` and `git commit -m "<commit_message>"` in the background.
 2. **File Operations**: Background commits are automatically generated for file actions that don't trigger normal buffer write events (e.g. deleting/renaming notes inside the explorer, saving a quick capture scratchpad, pasting images, and move operations).
 3. **No Network Activity**: The plugin only performs `git add` and `git commit` operations. It never performs remote network operations like `git push` or `git pull`, ensuring offline compatibility and speed.
+
+---
+
+## 📋 Note Templates
+
+`notes.nvim` provides a powerful note template engine. When creating a new note (via `:Notes new` or `n` in the explorer), a Telescope template picker lets you choose from pre-defined templates.
+
+### Dynamic Placeholders
+Within your templates, you can use the following standard placeholders which are resolved dynamically:
+- `%TITLE%`: The title of the note.
+- `%DATE%`: The current date formatted using `date_format`.
+- `%BODY%`: Default content or blank space.
+
+### 1. File-based Custom Templates
+You can create custom templates as standard Markdown files inside the `templates/` folder of your notes directory:
+- Path: `<notes_dir>/templates/<template-name>.md`
+- The name of the file (excluding `.md`) will appear in the template selection picker.
+- Any notes created from file-based templates are fully configured with standard YAML frontmatter.
+- **Hygiene & Filtering**: To keep your workspace clean, any files/folders inside the `templates/` directory are automatically excluded from the Notes Explorer sidebar, global Telescope note lists, live grep content searches, and autocompletion lists.
+
+### 2. Config-based Lua Templates
+You can also define templates in your Neovim config Lua setup function under the `templates` key:
+```lua
+require("notes").setup({
+  notes_dir = "~/.notes",
+  templates = {
+    custom_project = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: ["project"]
+---
+# Project: %TITLE%
+- Task 1
+- Task 2
+]]
+  }
+})
+```
+
+#### Pre-defined Templates
+The plugin comes built-in with several standard templates:
+- `bug`: For bug reports and tracking.
+- `documentation`: For tech specs and library docs.
+- `job_application`: For tracking company applications.
+- `meeting`: For meeting minutes, agendas, and action items.
+- `release`: For application release notes.
+- `rfc`: For Request for Comments designs.
+- `til`: For "Today I Learned" quick learnings.
+- `daily`: Default template for daily journals.
+
 
 
