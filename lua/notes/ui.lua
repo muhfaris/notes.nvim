@@ -345,19 +345,25 @@ end
 
 -- API to create a new note
 M.new_note = function(title)
-	local function create_note_file(input_title, template_content)
+	local function create_note_file(input_title, template_content, directory)
 		local date = os.date(config.date_format)
 		local time = os.date(config.time_format)
 		local sanitized_title = utils.sanitize_title(input_title)
 
-		local yyyy, mm, dd = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
-		local dir_path = config.notes_dir
+		local dir_path
 		local filename
-		if yyyy and mm and dd then
-			dir_path = string.format("%s/%s/%s/%s", config.notes_dir, yyyy, mm, dd)
+		if directory then
+			dir_path = config.notes_dir .. "/" .. directory
 			filename = sanitized_title .. ".md"
 		else
-			filename = string.format("%s_%s.md", sanitized_title, date)
+			local yyyy, mm, dd = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+			if yyyy and mm and dd then
+				dir_path = string.format("%s/%s/%s/%s", config.notes_dir, yyyy, mm, dd)
+				filename = sanitized_title .. ".md"
+			else
+				dir_path = config.notes_dir
+				filename = string.format("%s_%s.md", sanitized_title, date)
+			end
 		end
 
 		if vim.fn.isdirectory(dir_path) == 0 then
@@ -398,24 +404,44 @@ M.new_note = function(title)
 		vim.notify("Note created: " .. filename, vim.log.levels.INFO)
 	end
 
-	local function get_title_and_create(template_content)
+	local function get_title_and_create(template_content, directory)
 		if title and title ~= "" then
-			create_note_file(title, template_content)
+			create_note_file(title, template_content, directory)
 		else
 			prompt_title_popup(function(input_title)
-				create_note_file(input_title, template_content)
+				create_note_file(input_title, template_content, directory)
 			end)
 		end
 	end
 
+	local builtins = require("notes.config")._builtin_templates
+	local builtin_daily = require("notes.config")._builtin_daily_template
+
 	local all_templates = {}
 	if config.templates and type(config.templates) == "table" then
 		for k, v in pairs(config.templates) do
-			all_templates[k] = { type = "config", content = v }
+			if type(v) == "table" then
+				all_templates[k] = {
+					type = "config",
+					content = v.content or builtins[k],
+					directory = v.directory,
+				}
+			else
+				all_templates[k] = { type = "config", content = v }
+			end
 		end
 	end
 	if config.daily_template and not all_templates.daily then
-		all_templates.daily = { type = "config", content = config.daily_template }
+		local dt = config.daily_template
+		if type(dt) == "table" then
+			all_templates.daily = {
+				type = "config",
+				content = dt.content or builtin_daily,
+				directory = dt.directory,
+			}
+		else
+			all_templates.daily = { type = "config", content = dt }
+		end
 	end
 
 	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
@@ -440,13 +466,13 @@ M.new_note = function(title)
 			return nil
 		end
 		if t.type == "config" then
-			return t.content
+			return t.content, t.directory
 		elseif t.type == "file" then
 			local f = io.open(t.path, "r")
 			if f then
 				local content = f:read("*all")
 				f:close()
-				return content
+				return content, nil
 			end
 		end
 		return nil
@@ -465,7 +491,7 @@ M.new_note = function(title)
 					define_preview = function(self, entry, status)
 						local template_name = entry.value
 						local template_content = get_template_content(template_name)
-						if template_content then
+						if template_content and type(template_content) == "string" then
 							local lines = vim.split(template_content, "\n")
 							vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
 							vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
@@ -478,8 +504,8 @@ M.new_note = function(title)
 						actions.close(prompt_bufnr)
 						local selection = action_state.get_selected_entry()
 						if selection then
-							local template_content = get_template_content(selection.value)
-							get_title_and_create(template_content)
+							local template_content, directory = get_template_content(selection.value)
+							get_title_and_create(template_content, directory)
 						end
 					end)
 					return true
@@ -488,7 +514,8 @@ M.new_note = function(title)
 			:find()
 		return
 	elseif #keys == 1 then
-		get_title_and_create(get_template_content(keys[1]))
+		local content, directory = get_template_content(keys[1])
+		get_title_and_create(content, directory)
 		return
 	end
 
@@ -2586,9 +2613,15 @@ M.outline = function()
 					local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 					vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
 					vim.api.nvim_set_option_value("filetype", "markdown", { buf = self.state.bufnr })
-					attach_markview(self.state.bufnr)
-					-- Scroll preview window to the selected heading line
-					pcall(vim.api.nvim_win_set_cursor, self.state.winid, { entry.heading.lnum, 0 })
+					if package.loaded["markview"] then
+						vim.schedule(function()
+							local mv = require("markview").strict_render
+							mv:clear(self.state.bufnr)
+							mv:render(self.state.bufnr)
+							-- Scroll preview window to the selected heading line
+							pcall(vim.api.nvim_win_set_cursor, self.state.winid, { entry.heading.lnum, 0 })
+						end)
+					end
 				end,
 			}),
 			attach_mappings = function(prompt_bufnr, map)

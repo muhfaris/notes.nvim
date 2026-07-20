@@ -334,6 +334,40 @@ tags: ["project"]
 })
 ```
 
+#### Custom Directories
+
+By default, notes are saved to date-based subdirectories (`YYYY/MM/DD/title.md`). You can override this per template by specifying a `directory`:
+
+```lua
+require("notes").setup({
+  notes_dir = "~/.notes",
+  templates = {
+    job_application = { directory = "documents/jobs/applications" },
+    documentation = { directory = "docs/tech" },
+    meeting = { directory = "meetings" },
+  }
+})
+```
+
+When set, notes from that template are saved to `<notes_dir>/<directory>/<title>.md`. The built-in template content is preserved — you only need to specify `directory`. You can also provide custom `content` alongside `directory`:
+
+```lua
+templates = {
+  job_application = {
+    content = [[---
+title: "%TITLE%"
+date: "%DATE%"
+---
+# %TITLE%
+
+## Status
+- [ ] Applied
+]],
+    directory = "documents/jobs/applications",
+  }
+}
+```
+
 #### Pre-defined Templates
 The plugin comes built-in with several standard templates:
 - `bug`: For bug reports and tracking.
