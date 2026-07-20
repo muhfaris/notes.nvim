@@ -303,6 +303,14 @@ summary: ""
 	},
 }
 
+-- Store original default templates before user override so table overrides
+-- (e.g., { directory = "..." }) can still fall back to the built-in content.
+-- Module-local so it can never be touched by vim.tbl_deep_extend.
+local BUILTIN_TEMPLATES = vim.deepcopy(M.config.templates)
+local BUILTIN_DAILY_TEMPLATE = M.config.daily_template
+M._builtin_templates = BUILTIN_TEMPLATES
+M._builtin_daily_template = BUILTIN_DAILY_TEMPLATE
+
 -- Function to set up the plugin
 M.setup = function(opts)
 	opts = opts or {}
