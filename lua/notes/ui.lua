@@ -2892,4 +2892,243 @@ M.choose_icon = function()
 		:find()
 end
 
+-- Opens side-by-side diffsplit comparison between active note and a historical revision
+M.open_diffsplit = function(filepath, commit_hash)
+	local git = require("notes.git")
+	git.get_file_at_commit(filepath, commit_hash, function(success, content)
+		if not success or not content then
+			vim.schedule(function()
+				vim.notify("Failed to load historical note snapshot", vim.log.levels.ERROR)
+			end)
+			return
+		end
+
+		vim.schedule(function()
+			-- Ensure target note is active in current window
+			if vim.fn.resolve(vim.api.nvim_buf_get_name(0)) ~= vim.fn.resolve(filepath) then
+				open_note_buffer(filepath)
+			end
+			local current_win = vim.api.nvim_get_current_win()
+
+			-- Create scratch buffer for historical revision
+			local hist_buf = vim.api.nvim_create_buf(false, true)
+			local lines = vim.split(content, "\n")
+			vim.api.nvim_buf_set_lines(hist_buf, 0, -1, false, lines)
+			vim.api.nvim_set_option_value("filetype", "markdown", { buf = hist_buf })
+			vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = hist_buf })
+			pcall(vim.api.nvim_buf_set_name, hist_buf, "notes://history/" .. commit_hash:sub(1, 7) .. "/" .. vim.fn.fnamemodify(filepath, ":t"))
+
+			-- Open vertical split for history comparison
+			vim.cmd("vsplit")
+			local hist_win = vim.api.nvim_get_current_win()
+			vim.api.nvim_win_set_buf(hist_win, hist_buf)
+
+			-- Enable diff mode in both windows
+			vim.cmd("diffthis")
+			vim.api.nvim_set_current_win(current_win)
+			vim.cmd("diffthis")
+
+			-- Keymap 'q' in historical buffer to exit diff mode safely
+			vim.keymap.set("n", "q", function()
+				if vim.api.nvim_win_is_valid(hist_win) then
+					vim.api.nvim_win_close(hist_win, true)
+				end
+				if vim.api.nvim_win_is_valid(current_win) then
+					vim.api.nvim_set_current_win(current_win)
+					vim.cmd("diffoff")
+				end
+			end, { buffer = hist_buf, silent = true, desc = "Close History Diffsplit" })
+
+			vim.notify("Diffsplit opened! Use ]c/[c to jump changes, 'do'/'dp' to copy snippets, 'q' to close.", vim.log.levels.INFO)
+		end)
+	end)
+end
+
+-- Displays Note Revision History timeline with Live Diff Previewer and interactive actions
+M.note_history = function(target_file)
+	local git = require("notes.git")
+	local filepath = target_file
+	if not filepath or filepath == "" then
+		filepath = vim.api.nvim_buf_get_name(0)
+	end
+
+	if not filepath or filepath == "" then
+		vim.notify("No note file selected to view history.", vim.log.levels.WARN)
+		return
+	end
+
+	filepath = vim.fn.resolve(filepath)
+	local notes_dir = vim.fn.resolve(config.notes_dir):gsub("/+$", "")
+	if filepath:sub(1, #notes_dir) ~= notes_dir then
+		vim.notify("Active file is not inside notes directory.", vim.log.levels.WARN)
+		return
+	end
+
+	git.get_history(filepath, function(success, history)
+		if not success or not history or #history == 0 then
+			vim.schedule(function()
+				vim.notify("No Git history found for note: " .. vim.fn.fnamemodify(filepath, ":t"), vim.log.levels.INFO)
+			end)
+			return
+		end
+
+		vim.schedule(function()
+			local displayer = entry_display.create({
+				separator = " │ ",
+				items = {
+					{ width = 14 }, -- Relative date (e.g., "11 hours ago")
+					{ width = 18 }, -- Date/Time from commit (e.g., "2026-07-21 15:04") or custom msg
+					{ width = 10 }, -- Delta (+num / -num)
+				},
+			})
+
+			local make_display = function(entry)
+				local item = entry.value
+				local delta_str = string.format("+%d / -%d", item.additions, item.deletions)
+				local msg_display = item.subject
+				local dt_match = item.subject:match("update notes %((.-)%)")
+				if dt_match then
+					msg_display = dt_match
+				end
+
+				return displayer({
+					{ item.relative_date, "TelescopeResultsSpecialComment" },
+					{ msg_display, "TelescopeResultsIdentifier" },
+					{ delta_str, "TelescopeResultsNumber" },
+				})
+			end
+
+			local preview_mode = "diff" -- Default preview mode: In-Picker Live Diff Preview
+
+			pickers
+				.new({}, {
+					prompt_title = "Note Revision History (" .. vim.fn.fnamemodify(filepath, ":t") .. ") | <Tab>: toggle | <CR>: diffsplit | <C-r>: restore | <C-y>: copy",
+					layout_strategy = "horizontal",
+					layout_config = {
+						horizontal = {
+							preview_width = 0.70,
+						},
+						width = 0.92,
+						height = 0.88,
+						preview_cutoff = 0,
+					},
+					finder = finders.new_table({
+						results = history,
+						entry_maker = function(item)
+							item.filepath = filepath
+							return {
+								value = item,
+								display = make_display,
+								ordinal = item.relative_date .. " " .. item.subject .. " " .. item.short_hash,
+							}
+						end,
+					}),
+					sorter = conf.generic_sorter({}),
+					previewer = previewers.new_buffer_previewer({
+						title = "Preview (Live Diff)",
+						define_preview = function(self, entry, status)
+							local item = entry.value
+							local bufnr = self.state.bufnr
+
+							if preview_mode == "diff" then
+								git.get_commit_diff(item.filepath, item.hash, function(ok, diff_text)
+									vim.schedule(function()
+										if vim.api.nvim_buf_is_valid(bufnr) then
+											local lines = vim.split(ok and diff_text or "No diff output", "\n")
+											vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+											vim.api.nvim_set_option_value("filetype", "diff", { buf = bufnr })
+										end
+									end)
+								end)
+							else
+								git.get_file_at_commit(item.filepath, item.hash, function(ok, content)
+									vim.schedule(function()
+										if vim.api.nvim_buf_is_valid(bufnr) then
+											local lines = vim.split(ok and content or "Failed to load snapshot", "\n")
+											vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+											vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
+											attach_markview(bufnr)
+										end
+									end)
+								end)
+							end
+						end,
+					}),
+					attach_mappings = function(prompt_bufnr, map)
+						-- <Tab>: Toggle preview mode between Live Diff and Full Snapshot
+						map({ "i", "n" }, "<Tab>", function()
+							preview_mode = (preview_mode == "diff") and "snapshot" or "diff"
+							local picker = action_state.get_current_picker(prompt_bufnr)
+							local title = preview_mode == "diff" and "Preview (Live Diff)" or "Preview (Full Snapshot)"
+							if picker.previewer and picker.previewer.state and picker.previewer.state.winid then
+								local win = picker.previewer.state.winid
+								if vim.api.nvim_win_is_valid(win) then
+									vim.api.nvim_win_set_config(win, { title = title })
+								end
+							end
+							picker:selection_changed()
+						end)
+
+						-- <CR>: Open native side-by-side diffsplit comparison
+						actions.select_default:replace(function()
+							local selection = action_state.get_selected_entry()
+							actions.close(prompt_bufnr)
+							if selection then
+								M.open_diffsplit(selection.value.filepath, selection.value.hash)
+							end
+						end)
+
+						-- <C-r>: Revert note to selected commit with pre-restore safety commit
+						map({ "i", "n" }, "<C-r>", function()
+							local selection = action_state.get_selected_entry()
+							if not selection then return end
+							local item = selection.value
+
+							actions.close(prompt_bufnr)
+							local confirm = vim.fn.confirm("Restore note to revision from " .. item.relative_date .. "?\n(Your current state will be auto-saved first)", "&Yes\n&No", 2)
+							if confirm == 1 then
+								-- Perform safety commit of active state
+								git.commit("Pre-restore safety snapshot", false)
+
+								git.get_file_at_commit(item.filepath, item.hash, function(ok, content)
+									if ok and content then
+										vim.schedule(function()
+											local f = io.open(item.filepath, "w")
+											if f then
+												f:write(content)
+												f:close()
+												open_note_buffer(item.filepath)
+												git.commit("Restored note to revision " .. item.short_hash, false)
+												vim.notify("Restored note to revision from " .. item.relative_date, vim.log.levels.INFO)
+											end
+										end)
+									end
+								end)
+							end
+						end)
+
+						-- <C-y>: Copy snapshot content to clipboard
+						map({ "i", "n" }, "<C-y>", function()
+							local selection = action_state.get_selected_entry()
+							if not selection then return end
+							local item = selection.value
+
+							git.get_file_at_commit(item.filepath, item.hash, function(ok, content)
+								if ok and content then
+									vim.schedule(function()
+										vim.fn.setreg("+", content)
+										vim.notify("Copied snapshot (" .. item.short_hash .. ") to clipboard", vim.log.levels.INFO)
+									end)
+								end
+							end)
+						end)
+
+						return true
+					end,
+				})
+				:find()
+		end)
+	end)
+end
+
 return M
