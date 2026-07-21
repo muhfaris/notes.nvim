@@ -98,7 +98,11 @@ When editing markdown files in your `notes_dir`, the plugin automatically activa
 
 * **Wiki-link Jump (`<CR>`)**: Press `<CR>` while cursor is on `[[Link]]` to navigate to that note.
 * **Task Toggle (`<leader>nt`)**: Toggle checklist state on the current line between `- [ ]` and `- [x]`.
-* **Highlight Toggle (`<leader>nh`)**: Highlight the selected text in visual mode or toggle highlighting on the word under the cursor using `==` tags.
+* **Bold (`<leader>nb`)**: Toggle bold formatting (`**text**`) on visual selection.
+* **Italic (`<leader>ni`)**: Toggle italic formatting (`*text*`) on visual selection.
+* **Strikethrough (`<leader>ns`)**: Toggle strikethrough formatting (`~~text~~`) on visual selection.
+* **Hyperlink (`<leader>nl`)**: Prompt for URL and insert formatted hyperlink (`[text](URL)`) on visual selection.
+* **Highlight Toggle (`<leader>nh`)**: Toggle highlight formatting (`==text==`) on visual selection.
 
 ---
 
