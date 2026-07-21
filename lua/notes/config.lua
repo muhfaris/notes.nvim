@@ -196,6 +196,7 @@ summary: ""
 			["<leader>ntc"] = "insert_toc",
 			["<leader>ni"] = "choose_icon",
 			["<leader>nb"] = "backlinks",
+			["<leader>nh"] = "history",
 		},
 	},
 	key_desc = {
@@ -218,6 +219,7 @@ summary: ""
 		outline = "Notes: Interactive Outline",
 		insert_toc = "Notes: Insert Table of Contents",
 		choose_icon = "Notes: Choose Icon",
+		history = "Notes: View Revision History",
 	},
 	length_summary = 140,
 	length_title = 60,
@@ -299,6 +301,9 @@ summary: ""
 		end,
 		choose_icon = function()
 			require("notes.ui").choose_icon()
+		end,
+		history = function()
+			require("notes.ui").note_history()
 		end,
 	},
 }
