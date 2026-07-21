@@ -174,10 +174,30 @@ M.setup = function(opts)
 				require("notes.tasks").toggle_task()
 			end, { buffer = ev.buf, desc = "Toggle Markdown Task", silent = true })
 
-			-- Bind toggle highlight to <leader>nh
-			vim.keymap.set({ "n", "v" }, "<leader>nh", function()
-				require("notes.highlight").toggle_highlight()
+			-- Bind toggle highlight to <leader>nh (Visual mode)
+			vim.keymap.set("v", "<leader>nh", function()
+				require("notes.formatting").toggle_highlight()
 			end, { buffer = ev.buf, desc = "Toggle Markdown Highlight", silent = true })
+
+			-- Bind toggle bold to <leader>nb (Visual mode)
+			vim.keymap.set("v", "<leader>nb", function()
+				require("notes.formatting").toggle_bold()
+			end, { buffer = ev.buf, desc = "Toggle Markdown Bold", silent = true })
+
+			-- Bind toggle italic to <leader>ni (Visual mode)
+			vim.keymap.set("v", "<leader>ni", function()
+				require("notes.formatting").toggle_italic()
+			end, { buffer = ev.buf, desc = "Toggle Markdown Italic", silent = true })
+
+			-- Bind toggle strikethrough to <leader>ns (Visual mode)
+			vim.keymap.set("v", "<leader>ns", function()
+				require("notes.formatting").toggle_strikethrough()
+			end, { buffer = ev.buf, desc = "Toggle Markdown Strikethrough", silent = true })
+
+			-- Bind insert hyperlink to <leader>nl (Visual mode)
+			vim.keymap.set("v", "<leader>nl", function()
+				require("notes.formatting").insert_link()
+			end, { buffer = ev.buf, desc = "Insert Markdown Hyperlink", silent = true })
 
 			-- Configure omnifunc for wiki-link completion
 			vim.bo[ev.buf].omnifunc = "v:lua.require'notes.ui'.omnifunc"
