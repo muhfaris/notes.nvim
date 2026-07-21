@@ -13,9 +13,10 @@
 - **🔗 Inter-note Wiki-Links**: Press `<CR>` on any `[[Linked Note]]` or `[[2026-07-10]]` to jump to it instantly. If the linked note doesn't exist, the plugin prompts to create it.
 - **☑️ Task Checklists**: Easily toggle markdown checkbox items (`- [ ]` / `- [x]`) using `<leader>nt` (buffer-local, fully customizable).
 - **🖼️ Portable Clipboard Image Pasting**: Paste images directly from your clipboard across Linux (X11 & Wayland), macOS, and Windows. Saves files into `notes_dir/images/` and links them with portable relative paths (`images/image.png`).
-- **🔍 Telescope Integration**: Fuzzy find notes by title/tags/date via a clean column-based Telescope list (`:Notes list`), or live grep inside note content (`:Notes search`).
+- **🔍 Telescope Integration**: Fuzzy find notes by title/tags/date via a clean column-based Telescope list (`:Notes list`), or live grep inside content (`:Notes search`).
 - **🧮 Markdown Table Math**: Excel-like cell calculation (`=SUM(A1:A3)`, `=AVG(...)`, arithmetic operations) overlaid via non-destructive virtual text. Updates automatically on save and mode changes.
-- **📋 Dynamic Custom Templates**: Merges built-in Lua templates with your custom templates defined as files in `<notes_dir>/templates/`. All template files are excluded from core search, explorer, and autocompletion lists to keep your workspace clean.
+- **📜 Note Revision History & Diff Viewer**: Human-centric timeline view (`:Notes history` / `<leader>nh`) powered by Git. Features In-Picker Live Diff Preview (Quick Scan), `<Tab>` snapshot/diff toggle, native side-by-side split (`diffsplit`), and non-destructive revert.
+- **📄 Dynamic Custom Templates**: Merges built-in Lua templates with your custom templates defined as files in `<notes_dir>/templates/`. All template files are excluded from core search, explorer, and autocompletion lists to keep your workspace clean.
 
 ---
 
@@ -47,6 +48,7 @@ return {
           ["<leader>ns"] = "search",       -- Live search note contents
           ["<leader>np"] = "paste_image",  -- Paste clipboard image
           ["<leader>nc"] = "quick_capture",-- Quick scratchpad capture
+          ["<leader>nh"] = "history",      -- Note revision history timeline
         },
       },
     }
@@ -69,6 +71,7 @@ The plugin registers a unified `:Notes` user command with completion support:
 | `:Notes search` | Search (live grep) note contents. |
 | `:Notes paste_image` | Paste clipboard image and insert relative markdown link. |
 | `:Notes capture` | Open a temporary scratchpad to quickly append thoughts/tasks to today's daily note. |
+| `:Notes history` / `:Notes log` | Open human-centric revision history timeline for the active note. |
 
 ---
 
@@ -98,11 +101,12 @@ When editing markdown files in your `notes_dir`, the plugin automatically activa
 
 * **Wiki-link Jump (`<CR>`)**: Press `<CR>` while cursor is on `[[Link]]` to navigate to that note.
 * **Task Toggle (`<leader>nt`)**: Toggle checklist state on the current line between `- [ ]` and `- [x]`.
+* **Revision History (`<leader>nh`)**: Open Telescope revision timeline with Live Diff Previewer (`<leader>nh` in Normal mode).
 * **Bold (`<leader>nb`)**: Toggle bold formatting (`**text**`) on visual selection.
 * **Italic (`<leader>ni`)**: Toggle italic formatting (`*text*`) on visual selection.
 * **Strikethrough (`<leader>ns`)**: Toggle strikethrough formatting (`~~text~~`) on visual selection.
 * **Hyperlink (`<leader>nl`)**: Prompt for URL and insert formatted hyperlink (`[text](URL)`) on visual selection.
-* **Highlight Toggle (`<leader>nh`)**: Toggle highlight formatting (`==text==`) on visual selection.
+* **Highlight Toggle (`<leader>nh`)**: Toggle highlight formatting (`==text==`) on visual selection (Visual mode).
 
 ---
 
