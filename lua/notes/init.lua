@@ -54,6 +54,18 @@ M.setup = function(opts)
 	-- Apply markview patches if present
 	patch_markview()
 
+	-- Dedicated swap directory for note buffers (keeps .swp files out of notes dir)
+	-- NOTE: 'directory' is a global-only option, so we prepend once at setup
+	if vim.o.swapfile then
+		local swap_dir = vim.fn.stdpath("data") .. "/notes-swap"
+		if vim.fn.isdirectory(swap_dir) == 0 then
+			vim.fn.mkdir(swap_dir, "p")
+		end
+		if not vim.o.directory:find("notes-swap", 1, true) then
+			vim.o.directory = swap_dir .. "//," .. vim.o.directory
+		end
+	end
+
 	-- Expose APIs
 	local ui = safe_require("notes.ui")
 	local utils = safe_require("notes.utils")
@@ -101,12 +113,53 @@ M.setup = function(opts)
 	local pattern_root = notes_dir .. "/*.md"
 	local pattern_nested = notes_dir .. "/**/*.md"
 
+	if vim.o.swapfile then
+		local swap_group = vim.api.nvim_create_augroup("NotesSwapExists", { clear = true })
+		vim.api.nvim_create_autocmd("SwapExists", {
+			group = swap_group,
+			pattern = "*",
+			callback = function(ev)
+				local target_file = vim.fs.normalize(ev.file ~= "" and ev.file or vim.api.nvim_buf_get_name(ev.buf))
+				local norm_notes_dir = vim.fs.normalize(notes_dir)
+
+				if target_file == "" or target_file:sub(1, #norm_notes_dir) ~= norm_notes_dir then
+					return
+				end
+
+				local swapfile = vim.v.swapname
+				if not swapfile or swapfile == "" then
+					return
+				end
+
+				local filename = vim.fn.fnamemodify(target_file ~= "" and target_file or swapfile, ":t")
+				local prompt = string.format("Swap file detected for %s", filename)
+				local choices_str = "&Recover\n&Edit anyway\n&Delete swap\n&Quit"
+				local idx = vim.fn.confirm(prompt, choices_str, 1, "Question")
+
+				if idx == 1 then
+					vim.v.swapchoice = "r"
+				elseif idx == 2 or idx == 3 then
+					if vim.fn.filereadable(swapfile) == 1 then
+						vim.fn.delete(swapfile)
+					end
+					vim.v.swapchoice = "e"
+				else
+					vim.v.swapchoice = "q"
+				end
+			end,
+		})
+	end
+
 	vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
 		group = group,
 		pattern = { pattern_root, pattern_nested },
 		callback = function(ev)
 			-- Mark as notes editor buffer
 			vim.b[ev.buf].notes_editor = true
+
+			if vim.o.swapfile then
+				vim.bo[ev.buf].swapfile = true
+			end
 
 			-- Apply/verify markview patches
 			patch_markview()
