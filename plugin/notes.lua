@@ -26,6 +26,9 @@ vim.api.nvim_create_user_command("Notes", function(opts)
 	if subcmd == "choose-icon" or subcmd == "icon" then
 		subcmd = "choose_icon"
 	end
+	if subcmd == "log" then
+		subcmd = "history"
+	end
 
 	-- Handle daily prev / daily next
 	if subcmd == "daily" and opts.fargs[2] then
@@ -59,7 +62,7 @@ vim.api.nvim_create_user_command("Notes", function(opts)
 		end
 		fn(table.concat(args, " "))
 	else
-		vim.api.nvim_err_writeln("Invalid notes subcommand. Available commands: new, daily, list, explorer, search, paste_image, migrate, tags, rename, delete, backlinks, tasks, notion, capture, outline, toc, insert_toc, icon")
+		vim.api.nvim_err_writeln("Invalid notes subcommand. Available commands: new, daily, list, explorer, search, paste_image, migrate, tags, rename, delete, backlinks, tasks, notion, capture, outline, toc, insert_toc, icon, history, log")
 	end
 end, {
 	nargs = "+",
@@ -99,7 +102,7 @@ end, {
 			end, notion_sub)
 		end
 
-		local subcommands = { "new", "daily", "list", "explorer", "search", "paste_image", "migrate", "tags", "rename", "delete", "backlinks", "tasks", "notion", "capture", "outline", "toc", "insert-toc", "icon" }
+		local subcommands = { "new", "daily", "list", "explorer", "search", "paste_image", "migrate", "tags", "rename", "delete", "backlinks", "tasks", "notion", "capture", "outline", "toc", "insert-toc", "icon", "history", "log" }
 		return vim.tbl_filter(function(cmd)
 			return cmd:match("^" .. ArgLead)
 		end, subcommands)

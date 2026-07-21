@@ -84,6 +84,7 @@ M.setup = function(opts)
 	M.outline = ui.outline
 	M.insert_toc = ui.insert_toc
 	M.choose_icon = ui.choose_icon
+	M.history = ui.note_history
 
 	-- Set up global keymaps if provided in setup options
 	if config.config and config.config.keymaps then
@@ -173,6 +174,11 @@ M.setup = function(opts)
 			vim.keymap.set("n", "<leader>nt", function()
 				require("notes.tasks").toggle_task()
 			end, { buffer = ev.buf, desc = "Toggle Markdown Task", silent = true })
+
+			-- Bind view history to <leader>nh (Normal mode)
+			vim.keymap.set("n", "<leader>nh", function()
+				ui.note_history()
+			end, { buffer = ev.buf, desc = "View Note Revision History", silent = true })
 
 			-- Bind toggle highlight to <leader>nh (Visual mode)
 			vim.keymap.set("v", "<leader>nh", function()
