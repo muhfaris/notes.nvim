@@ -21,22 +21,100 @@ local function attach_markview(bufnr)
 end
 M.attach_markview = attach_markview
 
--- Helper to open a note buffer based on the editor_style setting (current vs float)
-local function open_note_buffer(filepath, target_line)
-	local buf = vim.fn.bufadd(filepath)
-	local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
-	if ext ~= "md" then
-		-- For non-markdown assets (like images), if the buffer is already loaded,
-		-- wipe it first so that it is freshly loaded and triggers snacks.image autocommands
-		if vim.api.nvim_buf_is_loaded(buf) then
-			pcall(vim.api.nvim_buf_delete, buf, { force = true })
-			buf = vim.fn.bufadd(filepath)
+-- Compute the Neovim swap filename for a given filepath.
+local function get_swap_filepath(filepath)
+	if not vim.o.swapfile then
+		return nil
+	end
+	local encoded = filepath:gsub("[/\\]", "%%")
+	for _, dir in ipairs(vim.split(vim.o.directory, ",", { plain = true })) do
+		local clean_dir = vim.fs.normalize(dir):gsub("[/\\]+$", "")
+		local swap_name = clean_dir .. "/" .. encoded .. ".swp"
+		if vim.fn.filereadable(swap_name) == 1 then
+			return swap_name
 		end
-		vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+	end
+	return nil
+end
+
+-- Checks if a swap file exists for filepath and prompts the user using vim.fn.confirm.
+-- Called upfront in open_note_buffer to avoid low-level bufload E325 errors.
+local function check_swap_recovery(filepath)
+	if not vim.o.swapfile then
+		return "open"
 	end
 
-	vim.fn.bufload(buf)
+	local notes_dir = vim.fs.normalize(config.notes_dir or "")
+	if notes_dir ~= "" and filepath:sub(1, #notes_dir) ~= notes_dir then
+		return "open"
+	end
+
+	local swap_name = get_swap_filepath(filepath)
+	if not swap_name then
+		return "open"
+	end
+
+	local prompt = string.format("Swap file detected for %s", vim.fn.fnamemodify(filepath, ":t"))
+	local choices_str = "&Recover\n&Edit anyway\n&Delete swap\n&Quit"
+	local idx = vim.fn.confirm(prompt, choices_str, 1, "Question")
+
+	if idx == 1 then
+		return "recover"
+	elseif idx == 2 or idx == 3 then
+		vim.fn.delete(swap_name)
+		return "open"
+	else
+		return "quit"
+	end
+end
+
+-- Helper to open a note buffer based on the editor_style setting (current vs float)
+local function open_note_buffer(filepath, target_line)
+	local ext = vim.fn.fnamemodify(filepath, ":e"):lower()
+	local buf
+
+	local swap_action = check_swap_recovery(filepath)
+	if swap_action == "quit" then
+		return
+	end
+
+	if ext ~= "md" then
+		-- Non-markdown assets (e.g. images): force wipe + reload so snacks.image triggers
+		if swap_action == "recover" then
+			vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+			buf = vim.api.nvim_get_current_buf()
+			vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+		else
+			buf = vim.fn.bufadd(filepath)
+			if vim.api.nvim_buf_is_loaded(buf) then
+				pcall(vim.api.nvim_buf_delete, buf, { force = true })
+				buf = vim.fn.bufadd(filepath)
+			end
+			vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+			vim.fn.bufload(buf)
+		end
+	elseif config.editor_style == "current" then
+		if swap_action == "recover" then
+			vim.cmd("recover " .. vim.fn.fnameescape(filepath))
+		else
+			vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+		end
+		buf = vim.api.nvim_get_current_buf()
+	else
+		-- float/tab/split/vsplit: bypass :edit to avoid wiping the current buffer
+		if swap_action == "recover" then
+			vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+			buf = vim.api.nvim_get_current_buf()
+			pcall(vim.cmd, "recover")
+		else
+			buf = vim.fn.bufadd(filepath)
+			vim.fn.bufload(buf)
+		end
+	end
+
 	vim.b[buf].notes_editor = true
+
+	vim.bo[buf].swapfile = true
 
 	-- Register buffer-local autocommand to enforce wrapping and breakindent options
 	-- whenever the notes buffer is displayed in a window.
@@ -155,9 +233,6 @@ local function open_note_buffer(filepath, target_line)
 			"<cmd>w<CR><cmd>close<CR>",
 			{ buffer = buf, silent = true, desc = "Save and Close Note Split" }
 		)
-	else
-		-- Traditional: open in the current window
-		vim.cmd("edit " .. vim.fn.fnameescape(filepath))
 	end
 
 	vim.bo[buf].omnifunc = "v:lua.require'notes.ui'.omnifunc"
