@@ -170,10 +170,10 @@ M.setup = function(opts)
 				ui.follow_wiki_link()
 			end, { buffer = ev.buf, desc = "Follow Wiki Link", silent = true })
 
-			-- Bind toggle task to <leader>nt
-			vim.keymap.set("n", "<leader>nt", function()
-				require("notes.tasks").toggle_task()
-			end, { buffer = ev.buf, desc = "Toggle Markdown Task", silent = true })
+			-- Bind <CR> to follow wiki link
+			vim.keymap.set("n", "<CR>", function()
+				ui.follow_wiki_link()
+			end, { buffer = ev.buf, desc = "Follow Wiki Link", silent = true })
 
 			-- Bind view history to <leader>nh (Normal mode)
 			vim.keymap.set("n", "<leader>nh", function()
