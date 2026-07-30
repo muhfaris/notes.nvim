@@ -670,6 +670,7 @@ M.list_tasks = function()
 				end
 
 				for line in file:lines() do
+					-- 1. Incomplete checklist item: - [ ]
 					local task_text = line:match("^%s*%- %[ %]%s*(.*)")
 					if task_text and task_text ~= "" then
 						table.insert(tasks, {
@@ -678,8 +679,52 @@ M.list_tasks = function()
 							lnum = lnum,
 							text = task_text,
 							line = line,
+							type = "task",
 						})
 					end
+
+					-- 2. Inline TODO marker (case-insensitive, e.g. "- TODO: fix this" or "todo: important")
+					local _, todo_end = line:upper():find("TODO", 1, true)
+					if todo_end then
+						local after = line:sub(todo_end + 1):match(":?%s*(.*)")
+						if after and after ~= "" then
+							table.insert(tasks, {
+								path = note_path,
+								title = title,
+								lnum = lnum,
+								text = vim.trim(after),
+								line = line,
+								type = "todo",
+							})
+						end
+					end
+
+					-- 3. #todo tag
+					local todo_tag = line:match("#todo")
+					if todo_tag then
+						table.insert(tasks, {
+							path = note_path,
+							title = title,
+							lnum = lnum,
+							text = vim.trim(line),
+							line = line,
+							type = "#todo",
+						})
+					end
+
+					-- 4. #tech-debt tag
+					local tech_debt_tag = line:match("#tech%-debt")
+					if tech_debt_tag then
+						table.insert(tasks, {
+							path = note_path,
+							title = title,
+							lnum = lnum,
+							text = vim.trim(line),
+							line = line,
+							type = "#tech-debt",
+						})
+					end
+
 					lnum = lnum + 1
 				end
 				file:close()
@@ -688,20 +733,49 @@ M.list_tasks = function()
 	end
 
 	if #tasks == 0 then
-		vim.notify("No incomplete tasks found.", vim.log.levels.INFO)
+		vim.notify("No tasks, TODOs, or tagged items found.", vim.log.levels.INFO)
 		return
 	end
 
+	-- Sort: task items first, then TODO markers, then #todo, then #tech-debt
+	table.sort(tasks, function(a, b)
+		local order = { task = 1, todo = 2, ["#todo"] = 3, ["#tech-debt"] = 4 }
+		local ao = order[a.type] or 99
+		local bo = order[b.type] or 99
+		if ao ~= bo then
+			return ao < bo
+		end
+		return (a.title or ""):lower() < (b.title or ""):lower()
+	end)
+
+	local type_colors = {
+		task = "TelescopeResultsComment",
+		todo = "TelescopeResultsIdentifier",
+		["#todo"] = "TelescopeResultsNumber",
+		["#tech-debt"] = "TelescopeResultsSpecial",
+	}
+
+	local type_labels = {
+		task = "[ ]",
+		todo = "TODO",
+		["#todo"] = "#todo",
+		["#tech-debt"] = "#debt",
+	}
+
 	local displayer = entry_display.create({
-		separator = " │ ",
+		separator = " ",
 		items = {
-			{ width = 25 },
-			{ width = 60 },
+			{ width = 6 },
+			{ width = 24 },
+			{ width = 55 },
 		},
 	})
 
 	local make_display = function(entry)
+		local color = type_colors[entry.type] or "TelescopeResultsNormal"
+		local label = type_labels[entry.type] or entry.type
 		return displayer({
+			{ string.format("%-5s", label), color },
 			{ entry.title, "TelescopeResultsTitle" },
 			{ entry.text, "TelescopeResultsNormal" },
 		})
@@ -709,7 +783,7 @@ M.list_tasks = function()
 
 	pickers
 		.new({}, {
-			prompt_title = "Incomplete Tasks",
+			prompt_title = "Tasks & TODOs",
 			finder = finders.new_table({
 				results = tasks,
 				entry_maker = function(entry)
@@ -722,6 +796,7 @@ M.list_tasks = function()
 						filename = entry.path,
 						title = entry.title,
 						text = entry.text,
+						type = entry.type,
 					}
 				end,
 			}),
@@ -859,8 +934,38 @@ M.omnifunc = function(findstart, base)
 				end
 			end
 		end
-		return matches
 	end
+
+	-- Sort: daily notes descending by date (most recent first), then others alphabetically
+	table.sort(matches, function(a, b)
+		local a_is_daily = a.menu and a.menu:find("%[Daily", 1, true) == 1
+		local b_is_daily = b.menu and b.menu:find("%[Daily", 1, true) == 1
+
+		if a_is_daily and b_is_daily then
+			local function extract_date(entry)
+				local y, m, d = entry.abbr:match("(%d%d%d%d)%-(%d%d)%-(%d%d)")
+				if y then
+					return y .. m .. d
+				end
+				y, m, d = entry.word:match("(%d%d%d%d)%-(%d%d)%-(%d%d)")
+				if y then
+					return y .. m .. d
+				end
+				return ""
+			end
+			return extract_date(a) > extract_date(b)
+		elseif a_is_daily then
+			return true
+		elseif b_is_daily then
+			return false
+		else
+			local a_text = (a.abbr or a.word or ""):lower()
+			local b_text = (b.abbr or b.word or ""):lower()
+			return a_text < b_text
+		end
+	end)
+
+	return matches
 end
 
 -- API to follow wiki-links
