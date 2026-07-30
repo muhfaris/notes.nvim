@@ -220,6 +220,7 @@ summary: ""
 		insert_toc = "Notes: Insert Table of Contents",
 		choose_icon = "Notes: Choose Icon",
 		history = "Notes: View Revision History",
+		toggle_task = "Notes: Toggle Task",
 	},
 	length_summary = 140,
 	length_title = 60,
@@ -304,6 +305,9 @@ summary: ""
 		end,
 		history = function()
 			require("notes.ui").note_history()
+		end,
+		toggle_task = function()
+			require("notes.tasks").toggle_task()
 		end,
 	},
 }
