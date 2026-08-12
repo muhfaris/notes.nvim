@@ -221,7 +221,13 @@ function M.open()
 	-- Close key removes the Home window.
 	vim.keymap.set("n", "q", function()
 		local w = vim.api.nvim_get_current_win()
-		vim.api.nvim_win_close(w, true)
+		if vim.fn.winnr("$") == 1 then
+			-- Last window: replace Home with a clean empty buffer instead of closing.
+			vim.api.nvim_set_option_value("bufhidden", "", { buf = home_buf })
+			vim.cmd("enew")
+		else
+			vim.api.nvim_win_close(w, true)
+		end
 	end, opts)
 
 	-- Action keys run a command from within Home.
