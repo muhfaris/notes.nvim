@@ -7,6 +7,9 @@ M.config = {
 	date_format = "%Y-%m-%d",
 	time_format = "%H:%M:%S",
 	editor_style = "current", -- "current" (default), "float", "tab", "split", or "vsplit"
+	explorer = {
+		expand_all = true, -- expand all directories by default when opening the explorer
+	},
 	auto_toc = true,
 	toc_max_level = 4,
 	template = [[---
@@ -197,6 +200,7 @@ summary: ""
 			["<leader>ni"] = "choose_icon",
 			["<leader>nb"] = "backlinks",
 			["<leader>nh"] = "history",
+			["<leader>nm"] = "home",
 		},
 	},
 	key_desc = {
@@ -220,6 +224,7 @@ summary: ""
 		insert_toc = "Notes: Insert Table of Contents",
 		choose_icon = "Notes: Choose Icon",
 		history = "Notes: View Revision History",
+		home = "Notes: Home",
 		toggle_task = "Notes: Toggle Task",
 	},
 	length_summary = 140,
@@ -305,6 +310,9 @@ summary: ""
 		end,
 		history = function()
 			require("notes.ui").note_history()
+		end,
+		home = function()
+			require("notes.home").open()
 		end,
 		toggle_task = function()
 			require("notes.tasks").toggle_task()

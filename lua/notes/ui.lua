@@ -3,6 +3,7 @@ local M = {}
 local config = require("notes.config").get_config()
 local utils = require("notes.utils")
 local parser = require("notes.parser")
+local tasks_shared = require("notes.shared.tasks")
 
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
@@ -13,6 +14,41 @@ local entry_display = require("telescope.pickers.entry_display")
 local previewers = require("telescope.previewers")
 
 local EXPLORER_BUF_NAME = "notes://explorer"
+
+-- Strip the minimum common leading indentation from a multi-line template string,
+-- so users can indent their template `content` in config and still get flush-left files.
+local function dedent(str)
+	local lines = vim.split(str, "\n")
+	-- Track indentation of non-blank lines
+	local min_indent = nil
+	for _, line in ipairs(lines) do
+		if line:match("^%s+$") == nil and line ~= "" then
+			local _, col = line:find("^%s+")
+			local n = col and line:sub(1, col):len() or 0
+			if not min_indent or n < min_indent then
+				min_indent = n
+			end
+		end
+	end
+	if min_indent and min_indent > 0 then
+		local prefix = string.rep(" ", min_indent)
+		for i, line in ipairs(lines) do
+			-- Only strip from lines that actually begin with the prefix
+			if line:sub(1, min_indent) == prefix then
+				lines[i] = line:sub(min_indent + 1)
+			end
+		end
+	end
+	-- Drop a single leading blank line if present
+	if lines[1] == "" then
+		table.remove(lines, 1)
+	end
+	-- Drop a single trailing blank line if present
+	if lines[#lines] == "" then
+		table.remove(lines, #lines)
+	end
+	return table.concat(lines, "\n")
+end
 local copied_note_path = nil
 
 local function attach_markview(bufnr)
@@ -66,6 +102,18 @@ local function check_swap_recovery(filepath)
 	else
 		return "quit"
 	end
+end
+
+-- Save & close a note buffer. Only runs `:w` when the buffer actually has
+-- unsaved changes (`modified`); empty or already-persisted notes are just
+-- closed (`bdelete`) without writing, so an empty scratch note won't leave a
+-- wrecked file behind. Falls back to closing the window if no buffer delete.
+local function save_note_and_close()
+	local buf = vim.api.nvim_get_current_buf()
+	if vim.bo[buf].modified then
+		vim.cmd("write")
+	end
+	pcall(vim.api.nvim_buf_delete, buf, { force = true })
 end
 
 -- Helper to open a note buffer based on the editor_style setting (current vs float)
@@ -181,7 +229,7 @@ local function open_note_buffer(filepath, target_line)
 		vim.keymap.set(
 			"n",
 			"q",
-			"<cmd>w<CR><cmd>close<CR>",
+			save_note_and_close,
 			{ buffer = buf, silent = true, desc = "Save and Close Note Float" }
 		)
 
@@ -194,7 +242,7 @@ local function open_note_buffer(filepath, target_line)
 			vim.keymap.set(
 				"n",
 				"q",
-				"<cmd>w<CR><cmd>tabclose<CR>",
+				save_note_and_close,
 				{ buffer = buf, silent = true, desc = "Save and Close Note Tab" }
 			)
 		end, { buffer = buf, silent = true, desc = "Move Note from Float to Tab" })
@@ -212,7 +260,7 @@ local function open_note_buffer(filepath, target_line)
 		vim.keymap.set(
 			"n",
 			"q",
-			"<cmd>w<CR><cmd>tabclose<CR>",
+			save_note_and_close,
 			{ buffer = buf, silent = true, desc = "Save and Close Note Tab" }
 		)
 	elseif config.editor_style == "split" then
@@ -221,7 +269,7 @@ local function open_note_buffer(filepath, target_line)
 		vim.keymap.set(
 			"n",
 			"q",
-			"<cmd>w<CR><cmd>close<CR>",
+			save_note_and_close,
 			{ buffer = buf, silent = true, desc = "Save and Close Note Split" }
 		)
 	elseif config.editor_style == "vsplit" then
@@ -230,7 +278,7 @@ local function open_note_buffer(filepath, target_line)
 		vim.keymap.set(
 			"n",
 			"q",
-			"<cmd>w<CR><cmd>close<CR>",
+			save_note_and_close,
 			{ buffer = buf, silent = true, desc = "Save and Close Note Split" }
 		)
 	end
@@ -325,6 +373,7 @@ local function create_daily_note_at_path(full_path, dir_path, date_str)
 	local title = "Daily Note: " .. date_str
 	local template = (config.daily_template and config.daily_template ~= "") and config.daily_template
 		or config.template
+	template = dedent(template)
 	template = template:gsub("%%TITLE%%", title)
 	template = template:gsub("%%DATE%%", date_str .. " " .. time)
 	template = template:gsub("tags:%s*%[%s*%]", 'tags: ["daily"]')
@@ -447,6 +496,7 @@ M.new_note = function(title)
 		local full_path = dir_path .. "/" .. filename
 
 		local template = template_content or config.template
+		template = dedent(template)
 		template = template:gsub("%%TITLE%%", input_title)
 		template = template:gsub("%%DATE%%", date .. " " .. time)
 		template = template:gsub("%%BODY%%", "")
@@ -654,103 +704,17 @@ end
 -- API to list all incomplete tasks across notes
 M.list_tasks = function()
 	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
-	local notes = vim.fn.globpath(notes_dir, "**/*.md", false, true)
-	local tasks = {}
-
-	for _, note_path in ipairs(notes) do
-		local rel_path = note_path:sub(#notes_dir + 2):gsub("\\", "/")
-		if rel_path:sub(1, 10) ~= "templates/" then
-			local file = io.open(note_path, "r")
-			if file then
-				local lnum = 1
-				local title = vim.fn.fnamemodify(note_path, ":t:r")
-				local metadata = parser.read_file(note_path)
-				if metadata and metadata.title and metadata.title ~= "" then
-					title = metadata.title
-				end
-
-				for line in file:lines() do
-					-- 1. Incomplete checklist item: - [ ]
-					local task_text = line:match("^%s*%- %[ %]%s*(.*)")
-					if task_text and task_text ~= "" then
-						table.insert(tasks, {
-							path = note_path,
-							title = title,
-							lnum = lnum,
-							text = task_text,
-							line = line,
-							type = "task",
-						})
-					end
-
-					-- 2. Inline TODO marker (case-insensitive, e.g. "- TODO: fix this" or "todo: important")
-					local _, todo_end = line:upper():find("TODO", 1, true)
-					if todo_end then
-						local after = line:sub(todo_end + 1):match(":?%s*(.*)")
-						if after and after ~= "" then
-							table.insert(tasks, {
-								path = note_path,
-								title = title,
-								lnum = lnum,
-								text = vim.trim(after),
-								line = line,
-								type = "todo",
-							})
-						end
-					end
-
-					-- 3. #todo tag
-					local todo_tag = line:match("#todo")
-					if todo_tag then
-						table.insert(tasks, {
-							path = note_path,
-							title = title,
-							lnum = lnum,
-							text = vim.trim(line),
-							line = line,
-							type = "#todo",
-						})
-					end
-
-					-- 4. #tech-debt tag
-					local tech_debt_tag = line:match("#tech%-debt")
-					if tech_debt_tag then
-						table.insert(tasks, {
-							path = note_path,
-							title = title,
-							lnum = lnum,
-							text = vim.trim(line),
-							line = line,
-							type = "#tech-debt",
-						})
-					end
-
-					lnum = lnum + 1
-				end
-				file:close()
-			end
-		end
-	end
+	local tasks = tasks_shared.scan(notes_dir)
 
 	if #tasks == 0 then
 		vim.notify("No tasks, TODOs, or tagged items found.", vim.log.levels.INFO)
 		return
 	end
 
-	-- Sort: task items first, then TODO markers, then #todo, then #tech-debt
-	table.sort(tasks, function(a, b)
-		local order = { task = 1, todo = 2, ["#todo"] = 3, ["#tech-debt"] = 4 }
-		local ao = order[a.type] or 99
-		local bo = order[b.type] or 99
-		if ao ~= bo then
-			return ao < bo
-		end
-		return (a.title or ""):lower() < (b.title or ""):lower()
-	end)
-
 	local type_colors = {
 		task = "TelescopeResultsComment",
 		todo = "TelescopeResultsIdentifier",
+		ask = "TelescopeResultsTitle",
 		["#todo"] = "TelescopeResultsNumber",
 		["#tech-debt"] = "TelescopeResultsSpecial",
 	}
@@ -758,6 +722,7 @@ M.list_tasks = function()
 	local type_labels = {
 		task = "[ ]",
 		todo = "TODO",
+		ask = "ASK",
 		["#todo"] = "#todo",
 		["#tech-debt"] = "#debt",
 	}
@@ -1461,7 +1426,7 @@ M.render_explorer = function(buf)
 		for _, d in ipairs(dirs) do
 			local indent = string.rep("  ", depth + 1)
 			if _G.notes_explorer_expanded[d.path] == nil then
-				_G.notes_explorer_expanded[d.path] = true
+				_G.notes_explorer_expanded[d.path] = config.explorer.expand_all
 			end
 			local expanded = _G.notes_explorer_expanded[d.path]
 
@@ -2003,12 +1968,127 @@ M.bind_explorer_keys = function(buf, line_to_path)
 			end
 		end)
 	end
+	local function show_details()
+		local line_num = vim.api.nvim_win_get_cursor(0)[1]
+		local note_path = line_to_path[line_num]
+		if not note_path then
+			return
+		end
+		local lines
+		if vim.fn.isdirectory(note_path) == 1 then
+			local rel = get_relative_path(note_path)
+			local count = 0
+			local recurse
+			recurse = function(dir)
+					for _, entry in ipairs(vim.fn.readdir(dir)) do
+						if not entry:match("^%.") and entry ~= "templates" then
+							local p = dir .. "/" .. entry
+							if vim.fn.isdirectory(p) == 1 then
+								recurse(p)
+							elseif entry:match("%.md$") then
+								count = count + 1
+							end
+						end
+					end
+				end
+				recurse(note_path)
+				lines = {
+					" Directory Details",
+					" =================",
+					"",
+					" Relative : " .. rel,
+					" Absolute : " .. note_path,
+					" Type     : Directory",
+					" Notes    : " .. tostring(count),
+				}
+		else
+				local ext = vim.fn.fnamemodify(note_path, ":e"):lower()
+				local rel = get_relative_path(note_path)
+				if ext == "md" then
+					local metadata = parser.read_file(note_path)
+					if not metadata then
+						vim.notify("Could not read note metadata.", vim.log.levels.WARN)
+						return
+					end
+					lines = {
+						" Note Details",
+						" ============",
+						"",
+						" Title    : " .. (metadata.title ~= "" and metadata.title or "-"),
+						" Relative : " .. rel,
+						" Absolute : " .. note_path,
+						" Date     : " .. (metadata.date ~= "" and metadata.date or "-"),
+						" Tags     : " .. ((metadata.tags and #metadata.tags > 0) and table.concat(metadata.tags, ", ") or "-"),
+						" Summary  : " .. (metadata.summary ~= "" and metadata.summary or "-"),
+					}
+					-- Custom fields (non-standard) not already shown
+					local standard = { title = true, date = true, tags = true, summary = true }
+					local keys = {}
+					for k, _ in pairs(metadata) do
+						if not standard[k] and type(metadata[k]) ~= "table" and metadata[k] ~= nil and metadata[k] ~= "" then
+							table.insert(keys, k)
+						end
+					end
+					table.sort(keys)
+					for _, k in ipairs(keys) do
+						table.insert(lines, string.format(" %s: %s", k:sub(1, 1):upper() .. k:sub(2), metadata[k]))
+					end
+				else
+					lines = {
+						" Asset Details",
+						" =============",
+						"",
+						" Relative : " .. rel,
+						" Absolute : " .. note_path,
+					" Type     : " .. (ext ~= "" and ext or "file"),
+					}
+				end
+		end
+
+		local width = 60
+		for _, l in ipairs(lines) do
+			width = math.max(width, #l + 4)
+		end
+		width = math.min(width, math.floor(vim.o.columns * 0.9))
+		local height = #lines + 2
+		local row = math.floor((vim.o.lines - height) / 2)
+		local col = math.floor((vim.o.columns - width) / 2)
+
+		local detail_buf = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_buf_set_lines(detail_buf, 0, -1, false, lines)
+		local detail_win = vim.api.nvim_open_win(detail_buf, true, {
+			relative = "editor",
+			width = width,
+			height = height,
+			row = row,
+			col = col,
+			style = "minimal",
+			border = "rounded",
+			title = " Details ",
+			title_pos = "center",
+		})
+
+		vim.api.nvim_set_option_value("modifiable", false, { buf = detail_buf })
+		vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = detail_buf })
+		vim.api.nvim_set_option_value("wrap", true, { win = detail_win })
+
+		local close = function()
+			if vim.api.nvim_win_is_valid(detail_win) then
+				vim.api.nvim_win_close(detail_win, true)
+			end
+		end
+		local hopts = { buffer = detail_buf, silent = true, noremap = true }
+		vim.keymap.set("n", "q", close, hopts)
+		vim.keymap.set("n", "<Esc>", close, hopts)
+	end
+
 	local function show_help()
 		local help_lines = {
 			" Notes Explorer Keymaps",
 			" =====================",
 			"",
 			" <CR> / o : Open note / Toggle directory",
+			" i        : Show note/dir details (metadata)",
 			" a        : Add new file/dir (ends with / for dir)",
 			" d        : Delete selected note/dir",
 			" r        : Rename selected note/dir",
@@ -2060,6 +2140,7 @@ M.bind_explorer_keys = function(buf, line_to_path)
 	local opts = { buffer = buf, silent = true, noremap = true }
 	vim.keymap.set("n", "<CR>", open_note, opts)
 	vim.keymap.set("n", "o", open_note, opts)
+	vim.keymap.set("n", "i", show_details, opts)
 	vim.keymap.set("n", "d", delete_note, opts)
 	vim.keymap.set("n", "r", rename_note, opts)
 	vim.keymap.set("n", "n", function()

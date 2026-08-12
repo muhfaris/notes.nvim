@@ -72,8 +72,28 @@ The plugin registers a unified `:Notes` user command with completion support:
 | `:Notes paste_image` | Paste clipboard image and insert relative markdown link. |
 | `:Notes capture` | Open a temporary scratchpad to quickly append thoughts/tasks to today's daily note. |
 | `:Notes history` / `:Notes log` | Open human-centric revision history timeline for the active note. |
+| `:Notes home` | Open the Notes Home dashboard in a dedicated window (recent notes + open tasks). |
 
 ---
+
+## 🏠 Notes Home Dashboard
+
+Open the dashboard with `:Notes home` or your bound key (global default:
+`<leader>nm`). It shows your most recently modified notes (from the MRU
+tracker) and your open tasks, with quick actions to jump somewhere else.
+Call it again (or `q`) to close it. It hosts like a welcome/home screen:
+
+* If the current window is still the empty startup buffer, Home opens **in that
+  window** as a welcome screen.
+* Otherwise it opens in a **new tab page** so it never interferes with what you're editing.
+
+* `<CR>` on a task line: open that note in a new split at the task's line.
+* `n`: new note · `d`: daily · `s`: search · `t`: tasks picker · `r`: refresh · `q`: close
+* Sections are color-coded and icon-led (`📚` title, `📌` recent, `📝` tasks, `🚀` actions).
+  Override the highlight groups `NotesHomeTitle`, `NotesHomeHeadRecent`,
+  `NotesHomeHeadTasks`, `NotesHomeHeadActions`, `NotesHomeRecentBody`,
+  `NotesHomeTaskBody`, `NotesHomeMuted` to restyle.
+* Recent notes come from the same MRU state that powers the `notes_recent` MCP tool.
 
 ## 🗂️ Notes Explorer Sidebar
 
@@ -81,6 +101,7 @@ Toggle the sidebar with `:Notes explorer` or your bound key.
 
 ### Keymaps inside the Explorer buffer:
 * `<CR>` / `o`: Open the highlighted note.
+* `i`: Show details/metadata for the selected note, directory, or asset.
 * `a`: Add a new file or directory (automatically detects: ends with `/` for directory, otherwise creates a file).
 * `d`: Delete the highlighted note (requires confirmation).
 * `r`: Rename the note title (automatically updates filename and YAML frontmatter title metadata).
@@ -92,6 +113,17 @@ Toggle the sidebar with `:Notes explorer` or your bound key.
 * `R`: Refresh/Reload the explorer directory structure.
 * `q`: Close the explorer sidebar.
 * `?`: Show the help popup displaying all available keymaps.
+
+By default, every directory is expanded when the explorer opens. To start collapsed
+instead, set:
+
+```lua
+require("notes").setup {
+  explorer = {
+    expand_all = false,
+  },
+}
+```
 
 ---
 
@@ -277,6 +309,53 @@ require("notes").setup {
 
 ---
 
+## 🤖 MCP Server (Model Context Protocol)
+
+`notes.nvim` ships with a built-in **MCP (Model Context Protocol) server** so AI agents (e.g. CodeCompanion.nvim) can read, write, search, and manage your notes directly — without manually traversing the filesystem.
+
+The server runs as a stdio-based JSON-RPC 2.0 process inside `nvim --headless` and uses your existing `notes.nvim` configuration (falling back to the `NOTES_DIR` environment variable, or `~/.notes`, when the plugin config is unavailable).
+
+### Launching the server
+
+Add the following to your MCP client configuration (e.g. CodeCompanion.nvim):
+
+```json
+{
+  "mcpServers": {
+    "notes": {
+      "command": "nvim",
+      "args": ["--headless", "-c", "lua require('notes.mcp').start()"]
+    }
+  }
+}
+```
+
+### Exposed tools
+
+The server registers the following tools:
+
+| Tool | Description | Required params | Optional params |
+| :--- | :--- | :--- | :--- |
+| `notes_list` | List all notes with metadata (title, date, tags, summary). | — | `query`, `tag`, `limit` |
+| `notes_read` | Read a note's full content and metadata by path (relative or absolute). | `path` | — |
+| `notes_search` | Search notes by title, tags, or summary. | `query` | `tag`, `limit` |
+| `notes_search_content` | Full-text search inside note content. Uses ripgrep when available, otherwise falls back to a built-in Lua search. | `query` | — |
+| `notes_backlinks` | Find notes containing wiki-links to a target note. | `path` | — |
+| `notes_get_metadata` | Get a note's YAML frontmatter metadata (including custom fields). | `path` | — |
+| `notes_create` | Create a new note with YAML frontmatter; resolves filename collisions automatically. Supports an optional named `template` (config templates like `rfc`/`meeting`/`bug`/`til`/`daily`, or files in `notes_dir/templates/`). | `title` | `content`, `tags`, `directory`, `template` |
+| `notes_delete` | Delete a note or directory by path (relative or absolute). | `path` | — |
+| `notes_update` | Update an existing note's content and/or frontmatter fields (title, tags, summary, date, custom fields). Omitted fields are preserved. | `path` | `content`, `title`, `tags`, `summary`, `date`, `metadata` |
+| `notes_recent` | Most recently opened/edited notes. `current` is the last-accessed note; `recent` is newest-first with path, title, date. Refreshed from your live session via the MRU state file. | — | `limit` |
+
+### Notes on behavior
+
+- **Path resolution**: Relative paths are resolved against your `notes_dir`; absolute paths are used as-is.
+- **Templates excluded**: Files under `notes_dir/templates/` are skipped during listing and search, keeping your workspace clean.
+- **Fallback dates**: Notes without a `date` in frontmatter report their file modification time.
+- **Protocol**: Implements MCP protocol version `2024-11-05` with `tools/list` and `tools/call` support, advertising itself as `notes-mcp` v`0.1.0`.
+
+---
+
 ## 💾 Git Auto-Commit Integration (Optional)
 
 `notes.nvim` includes an optional Git integration that automatically stages and commits your notes in the background. It is designed to be completely non-blocking, using Neovim's asynchronous process API (`vim.system`).
@@ -386,6 +465,5 @@ The plugin comes built-in with several standard templates:
 - `rfc`: For Request for Comments designs.
 - `til`: For "Today I Learned" quick learnings.
 - `daily`: Default template for daily journals.
-
 
 
