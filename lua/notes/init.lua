@@ -157,6 +157,7 @@ M.setup = function(opts)
 		callback = function(ev)
 			-- Mark as notes editor buffer
 			vim.b[ev.buf].notes_editor = true
+			require("notes.recent").persist(ev.buf)
 
 			if vim.o.swapfile then
 				vim.bo[ev.buf].swapfile = true
@@ -276,6 +277,7 @@ M.setup = function(opts)
 		group = group,
 		pattern = { pattern_root, pattern_nested },
 		callback = function(ev)
+			require("notes.recent").persist(ev.buf)
 			local notion_opts = config.config.notion
 			if notion_opts and notion_opts.enabled and notion_opts.sync_on_save then
 				require("notes.notion.sync").sync_active_note_debounced(ev.buf)
