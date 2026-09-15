@@ -72,12 +72,53 @@ local TOOL_MODULES = {
 	"notes.mcp.tools.delete",
 	"notes.mcp.tools.update",
 	"notes.mcp.tools.recent",
+	"notes.mcp.tools.tasks",
+	"notes.mcp.tools.toggle_task",
+	"notes.mcp.tools.add_subtask",
+	"notes.mcp.tools.board_status",
+	"notes.mcp.tools.rollover_tasks",
+	"notes.mcp.tools.history",
+	"notes.mcp.tools.diff",
 }
+
+local function normalize_strict_schema(schema, optional)
+	if type(schema) ~= "table" then
+		return
+	end
+
+	local schema_type = schema.type
+	if optional and type(schema_type) == "string" then
+		schema.type = { schema_type, "null" }
+	end
+
+	if schema_type == "object" then
+		local originally_required = {}
+		for _, name in ipairs(schema.required or {}) do
+			originally_required[name] = true
+		end
+
+		local required = {}
+		for name, property in pairs(schema.properties or {}) do
+			normalize_strict_schema(property, not originally_required[name])
+			required[#required + 1] = name
+		end
+		table.sort(required)
+		schema.required = required
+		schema.additionalProperties = false
+	elseif schema_type == "array" then
+		normalize_strict_schema(schema.items, false)
+	end
+end
 
 local tools = {}
 for _, mod in ipairs(TOOL_MODULES) do
 	local ok, tool = pcall(require, mod)
 	if ok and tool then
+		-- Strict function schemas require closed objects and every property in the
+		-- required array. Preserve optional semantics by making formerly optional
+		-- properties nullable. Enforce this at the registry boundary so new tools
+		-- cannot accidentally advertise an invalid schema.
+		normalize_strict_schema(tool.inputSchema, false)
 		tools[#tools + 1] = tool
 	else
 		-- A broken tool module must not kill the server.
@@ -90,6 +131,24 @@ end
 local tool_map = {}
 for _, t in ipairs(tools) do
 	tool_map[t.name] = t
+end
+
+local function omit_json_nulls(value)
+	if value == vim.NIL then
+		return nil
+	end
+	if type(value) ~= "table" then
+		return value
+	end
+
+	local cleaned = {}
+	for key, child in pairs(value) do
+		local normalized = omit_json_nulls(child)
+		if normalized ~= nil then
+			cleaned[key] = normalized
+		end
+	end
+	return cleaned
 end
 
 -- ── MCP Protocol Handler ───────────────────────────────────────────────
@@ -108,7 +167,9 @@ local function handle_request(request)
 		send_response(id, {
 			protocolVersion = "2024-11-05",
 			capabilities = {
-				tools = {},
+				-- MCP capability declarations are JSON objects. Neovim encodes an
+				-- empty Lua table as [], which strict clients such as Codex reject.
+				tools = vim.empty_dict(),
 			},
 			serverInfo = {
 				name = "notes-mcp",
@@ -133,7 +194,7 @@ local function handle_request(request)
 
 	if method == "tools/call" then
 		local tool_name = params.name
-		local args = params.arguments or {}
+		local args = omit_json_nulls(params.arguments or {})
 
 		local tool = tool_map[tool_name]
 		if not tool then

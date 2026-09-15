@@ -73,9 +73,18 @@ local function handler(args)
 		metadata.date = tostring(args.date)
 	end
 	if args.metadata ~= nil and type(args.metadata) == "table" then
-		for key, value in pairs(args.metadata) do
-			if type(value) ~= "table" then
-				metadata[key] = tostring(value)
+		if #args.metadata > 0 then
+			for _, entry in ipairs(args.metadata) do
+				if type(entry) == "table" and entry.key and type(entry.value) ~= "table" then
+					metadata[tostring(entry.key)] = tostring(entry.value)
+				end
+			end
+		else
+			-- Backward compatibility for non-strict MCP clients using the old map.
+			for key, value in pairs(args.metadata) do
+				if type(value) ~= "table" then
+					metadata[key] = tostring(value)
+				end
 			end
 		end
 	end
@@ -126,7 +135,21 @@ return {
 			tags = { type = "array", items = { type = "string" }, description = "Replaces all tags" },
 			summary = { type = "string", description = "New summary" },
 			date = { type = "string", description = "New date" },
-			metadata = { type = "object", description = "Custom frontmatter fields to set (scalar values only)" },
+			metadata = {
+				type = "array",
+				description = "Custom frontmatter fields as key/value entries (scalar values only)",
+				items = {
+					type = "object",
+					properties = {
+						key = { type = "string", description = "Frontmatter field name" },
+						value = {
+							type = { "string", "number", "boolean" },
+							description = "Frontmatter scalar value",
+						},
+					},
+					required = { "key", "value" },
+				},
+			},
 		},
 		required = { "path" },
 	},

@@ -3,7 +3,10 @@ local M = {}
 
 -- Default configuration
 M.config = {
-	notes_dir = vim.fn.expand("~/.notes"),
+	-- NOTES_DIR lets a test harness (or a headless MCP client) point at an
+	-- isolated notes directory without calling M.setup(); real setups always
+	-- override this via M.setup({ notes_dir = ... }) below.
+	notes_dir = vim.env.NOTES_DIR or vim.fn.expand("~/.notes"),
 	date_format = "%Y-%m-%d",
 	time_format = "%H:%M:%S",
 	editor_style = "current", -- "current" (default), "float", "tab", "split", or "vsplit"
@@ -197,6 +200,7 @@ summary: ""
 			["<leader>nc"] = "quick_capture",
 			["<leader>nto"] = "outline",
 			["<leader>ntc"] = "insert_toc",
+			["<leader>nta"] = "insert_subtask",
 			["<leader>ni"] = "choose_icon",
 			["<leader>nb"] = "backlinks",
 			["<leader>nh"] = "history",
@@ -226,6 +230,7 @@ summary: ""
 		history = "Notes: View Revision History",
 		home = "Notes: Home",
 		toggle_task = "Notes: Toggle Task",
+		insert_subtask = "Notes: Insert Subtask (linked detail note)",
 	},
 	length_summary = 140,
 	length_title = 60,
@@ -316,6 +321,9 @@ summary: ""
 		end,
 		toggle_task = function()
 			require("notes.tasks").toggle_task()
+		end,
+		insert_subtask = function()
+			require("notes.subtask").insert_subtask()
 		end,
 	},
 }
