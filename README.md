@@ -455,6 +455,42 @@ date: "%DATE%"
 }
 ```
 
+#### Selectable Subdirectories
+
+Use `options` when one template is shared by several projects or categories. The
+selected option is shown below the title field; use `<Tab>` and `<S-Tab>` to
+change it before pressing `<CR>`:
+
+```lua
+templates = {
+  rfc = {
+    directory = "projects/%OPTION%/rfc",
+    options = { "notes.nvim", "website", "backend-api" },
+    content = [[---
+title: "%TITLE%"
+date: "%DATE%"
+tags: ["project"]
+---
+
+# %TITLE%
+
+%BODY%
+]],
+  },
+}
+```
+
+`%OPTION%` in `directory` is replaced by the selected value. For example,
+selecting `backend-api` above creates the note at
+`<notes_dir>/projects/backend-api/rfc/<title>.md`. If `directory` does not
+contain `%OPTION%`, the selection is appended instead, so `directory =
+"projects"` creates `<notes_dir>/projects/backend-api/<title>.md`.
+
+Each option must be a single folder name; empty values, `.`/`..`, and values
+containing `/` or `\` are ignored. A template that uses `%OPTION%` without any
+valid options reports an error and does not create a note. Templates without
+`options` keep the original title popup and save behavior.
+
 #### Pre-defined Templates
 The plugin comes built-in with several standard templates:
 - `bug`: For bug reports and tracking.
@@ -465,5 +501,3 @@ The plugin comes built-in with several standard templates:
 - `rfc`: For Request for Comments designs.
 - `til`: For "Today I Learned" quick learnings.
 - `daily`: Default template for daily journals.
-
-

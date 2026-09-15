@@ -14,7 +14,6 @@ local function handler(args)
 	end
 
 	local results = {}
-	local escaped_query = vim.pesc(query)
 
 	-- Use grep if available for speed
 	local grep_cmd
@@ -47,7 +46,7 @@ local function handler(args)
 			if note.body then
 				local idx = 1
 				while true do
-					local s, e = note.body:find(escaped_query, idx, true)
+					local s, e = note.body:find(query, idx, true)
 					if not s then
 						break
 					end

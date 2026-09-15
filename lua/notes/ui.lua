@@ -300,9 +300,21 @@ local function truncate(text, width)
 end
 
 -- Helper to prompt user using a clean rounded floating window
-local function prompt_title_popup(callback)
+local function prompt_title_popup(callback, options, initial_title)
+	local folder_options = {}
+	if type(options) == "table" then
+		for _, option in ipairs(options) do
+			if type(option) == "string" then
+				local trimmed = vim.trim(option)
+				if trimmed ~= "" and trimmed ~= "." and trimmed ~= ".." and not trimmed:find("[/\\]") then
+					table.insert(folder_options, trimmed)
+				end
+			end
+		end
+	end
+
 	local width = 50
-	local height = 1
+	local height = #folder_options > 0 and 3 or 1
 	local row = math.floor((vim.o.lines - height) / 2)
 	local col = math.floor((vim.o.columns - width) / 2)
 
@@ -319,7 +331,24 @@ local function prompt_title_popup(callback)
 		title_pos = "center",
 	})
 
-	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "" })
+	local selected_option = 1
+	local function option_line()
+		return "Folder: " .. folder_options[selected_option]
+	end
+
+	local title_line = initial_title or ""
+	if #folder_options > 0 then
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+			title_line,
+			option_line(),
+			"Tab / Shift-Tab: change folder",
+		})
+		vim.api.nvim_buf_add_highlight(buf, -1, "Title", 1, 0, -1)
+		vim.api.nvim_buf_add_highlight(buf, -1, "Comment", 2, 0, -1)
+	else
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, { title_line })
+	end
+	vim.api.nvim_win_set_cursor(win, { 1, #title_line })
 	vim.cmd("startinsert")
 
 	local closed = false
@@ -341,13 +370,32 @@ local function prompt_title_popup(callback)
 		local title = vim.trim(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] or "")
 		close()
 		if title ~= "" then
-			callback(title)
+			callback(title, folder_options[selected_option])
 		else
 			vim.notify("Note creation cancelled: empty title", vim.log.levels.WARN)
 		end
 	end, { buffer = buf, silent = true })
 
+	if #folder_options > 0 then
+		local function select_option(step)
+			selected_option = ((selected_option - 1 + step) % #folder_options) + 1
+			vim.api.nvim_buf_set_lines(buf, 1, 2, false, { option_line() })
+			vim.api.nvim_buf_add_highlight(buf, -1, "Title", 1, 0, -1)
+			vim.api.nvim_win_set_cursor(win, { 1, #vim.api.nvim_get_current_line() })
+		end
+
+		vim.keymap.set("i", "<Tab>", function()
+			select_option(1)
+		end, { buffer = buf, silent = true })
+		vim.keymap.set("i", "<S-Tab>", function()
+			select_option(-1)
+		end, { buffer = buf, silent = true })
+	end
+
 	local cancel = function()
+		if closed then
+			return
+		end
 		close()
 		vim.notify("Note creation cancelled", vim.log.levels.INFO)
 	end
@@ -469,16 +517,51 @@ end
 
 -- API to create a new note
 M.new_note = function(title)
-	local function create_note_file(input_title, template_content, directory)
+	local function create_note_file(input_title, template_content, directory, folder_option)
 		local date = os.date(config.date_format)
 		local time = os.date(config.time_format)
 		local sanitized_title = utils.sanitize_title(input_title)
 
 		local dir_path
 		local filename
-		if directory then
-			dir_path = config.notes_dir .. "/" .. directory
+		if directory or folder_option then
+			dir_path = config.notes_dir
+			if directory then
+				local configured_directory = directory:gsub("^/*", ""):gsub("/*$", "")
+				-- Accept both %OPTION% and %OPTIONS% as the same placeholder: the
+				-- plural is an easy typo (it reads more naturally next to a plural
+				-- `options` list) and previously failed to match at all, silently
+				-- leaving the literal "%OPTIONS%" in the created path.
+				if configured_directory:find("%%OPTIONS?%%") then
+					if not folder_option then
+						vim.notify(
+							"Could not create note: template directory uses %OPTION%/%OPTIONS% but has no valid options",
+							vim.log.levels.ERROR
+						)
+						return
+					end
+					configured_directory = configured_directory:gsub("%%OPTIONS?%%", function()
+						return folder_option
+					end)
+					folder_option = nil
+				end
+				dir_path = dir_path .. "/" .. configured_directory
+			end
+			if folder_option then
+				dir_path = dir_path .. "/" .. folder_option
+			end
 			filename = sanitized_title .. ".md"
+
+			-- Defensive: never silently write into a path that still contains an
+			-- unresolved %placeholder% — that produces a garbage directory on disk
+			-- instead of a clear error.
+			if dir_path:find("%%%a+%%") then
+				vim.notify(
+					"Could not create note: unresolved template placeholder in directory: " .. dir_path,
+					vim.log.levels.ERROR
+				)
+				return
+			end
 		else
 			local yyyy, mm, dd = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
 			if yyyy and mm and dd then
@@ -529,13 +612,19 @@ M.new_note = function(title)
 		vim.notify("Note created: " .. filename, vim.log.levels.INFO)
 	end
 
-	local function get_title_and_create(template_content, directory)
+	local function get_title_and_create(template_content, directory, options)
 		if title and title ~= "" then
-			create_note_file(title, template_content, directory)
+			if type(options) == "table" and #options > 0 then
+				prompt_title_popup(function(input_title, folder_option)
+					create_note_file(input_title, template_content, directory, folder_option)
+				end, options, title)
+			else
+				create_note_file(title, template_content, directory)
+			end
 		else
-			prompt_title_popup(function(input_title)
-				create_note_file(input_title, template_content, directory)
-			end)
+			prompt_title_popup(function(input_title, folder_option)
+				create_note_file(input_title, template_content, directory, folder_option)
+			end, options)
 		end
 	end
 
@@ -550,6 +639,7 @@ M.new_note = function(title)
 					type = "config",
 					content = v.content or builtins[k],
 					directory = v.directory,
+					options = v.options,
 				}
 			else
 				all_templates[k] = { type = "config", content = v }
@@ -563,6 +653,7 @@ M.new_note = function(title)
 				type = "config",
 				content = dt.content or builtin_daily,
 				directory = dt.directory,
+				options = dt.options,
 			}
 		else
 			all_templates.daily = { type = "config", content = dt }
@@ -591,7 +682,7 @@ M.new_note = function(title)
 			return nil
 		end
 		if t.type == "config" then
-			return t.content, t.directory
+			return t.content, t.directory, t.options
 		elseif t.type == "file" then
 			local f = io.open(t.path, "r")
 			if f then
@@ -629,8 +720,8 @@ M.new_note = function(title)
 						actions.close(prompt_bufnr)
 						local selection = action_state.get_selected_entry()
 						if selection then
-							local template_content, directory = get_template_content(selection.value)
-							get_title_and_create(template_content, directory)
+							local template_content, directory, options = get_template_content(selection.value)
+							get_title_and_create(template_content, directory, options)
 						end
 					end)
 					return true
@@ -639,8 +730,8 @@ M.new_note = function(title)
 			:find()
 		return
 	elseif #keys == 1 then
-		local content, directory = get_template_content(keys[1])
-		get_title_and_create(content, directory)
+		local content, directory, options = get_template_content(keys[1])
+		get_title_and_create(content, directory, options)
 		return
 	end
 
@@ -762,8 +853,9 @@ M.list_tasks = function()
 						title = entry.title,
 						text = entry.text,
 						type = entry.type,
+						detail = entry.detail,
 					}
-				end,
+				end
 			}),
 			sorter = conf.generic_sorter({}),
 			previewer = previewers.new_buffer_previewer({
@@ -787,13 +879,19 @@ M.list_tasks = function()
 				end,
 			}),
 			attach_mappings = function(prompt_bufnr, map)
-				actions.select_default:replace(function()
-					actions.close(prompt_bufnr)
-					local selection = action_state.get_selected_entry()
-					if selection then
-						open_note_buffer(selection.value, selection.lnum)
-					end
-				end)
+					actions.select_default:replace(function()
+						actions.close(prompt_bufnr)
+						local selection = action_state.get_selected_entry()
+						if selection then
+							-- Prefer jumping into a linked detail note when the task has one;
+							-- otherwise open the containing note at the task line.
+							if selection.detail and selection.detail ~= "" then
+								open_note_buffer(selection.detail)
+							else
+								open_note_buffer(selection.value, selection.lnum)
+							end
+						end
+					end)
 				return true
 			end,
 		})
@@ -813,10 +911,15 @@ M.omnifunc = function(findstart, base)
 			start = start - 1
 		end
 		return -1
-	else
+	end
+
+	-- Declared here (not inside the branch below) so the sort/return at the
+	-- bottom of this function — outside that branch — can still see it.
+	local matches = {}
+
+	do
 		local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
 		local notes = vim.fn.globpath(notes_dir, "**/*.md", false, true)
-		local matches = {}
 		local base_lower = base:lower()
 
 		for _, note_path in ipairs(notes) do
@@ -903,8 +1006,8 @@ M.omnifunc = function(findstart, base)
 
 	-- Sort: daily notes descending by date (most recent first), then others alphabetically
 	table.sort(matches, function(a, b)
-		local a_is_daily = a.menu and a.menu:find("%[Daily", 1, true) == 1
-		local b_is_daily = b.menu and b.menu:find("%[Daily", 1, true) == 1
+		local a_is_daily = a.menu and a.menu:sub(1, 6) == "[Daily"
+		local b_is_daily = b.menu and b.menu:sub(1, 6) == "[Daily"
 
 		if a_is_daily and b_is_daily then
 			local function extract_date(entry)
@@ -970,6 +1073,116 @@ local function open_url(url)
 		vim.fn.jobstart({ opener, trimmed }, { detach = true })
 	end
 	vim.notify("Opening: " .. trimmed, vim.log.levels.INFO)
+	return true
+end
+
+--- Returns the on-disk path of an existing note that a wiki-link body resolves
+--- to, else nil. Pure lookup (no buffer side effects). Mirrors
+--- follow_wiki_link's resolution chain so this validator and the navigator
+--- never disagree. Handles the authored `Parent/Child` (and any leading-space
+--- ` parent/child`) body via the tasks/** title search.
+M.resolve_wiki_link_target = function(link_body)
+	local body = vim.trim(link_body or "")
+	if body == "" then
+		return nil
+	end
+
+	local notes = vim.fn.globpath(config.notes_dir, "**/*.md", false, true)
+
+	-- Filename match (exact, collapsed hyphens, or underscore-suffixed), mirroring
+	-- follow_wiki_link resolution step 3.
+	local sanitized_link = utils.sanitize_title(body)
+	local collapsed_sanitized = sanitized_link:gsub("-+", "-")
+	for _, note in ipairs(notes) do
+		local filename = vim.fn.fnamemodify(note, ":t:r")
+		local collapsed_filename = filename:gsub("-+", "-")
+		if
+			filename:lower() == body:lower()
+			or filename == sanitized_link
+			or collapsed_filename == collapsed_sanitized
+			or filename:match("^" .. vim.pesc(sanitized_link) .. "_")
+		then
+			return note
+		end
+	end
+
+	-- Frontmatter title match, mirroring follow_wiki_link resolution step 4.
+	for _, note in ipairs(notes) do
+		local md = parser.read_file(note)
+		if md and md.title and md.title ~= "" then
+			local collapsed_title = utils.sanitize_title(md.title):gsub("-+", "-")
+			if md.title:lower() == body:lower() or collapsed_title == collapsed_sanitized then
+				return note
+			end
+		end
+	end
+
+	-- Subtask parent/child fallback: last `/`-segment is the detail note title,
+	-- mirroring follow_wiki_link resolution step 5 (the case that matters here).
+	local ok, target = pcall(tasks_shared.resolve_detail_link, body, config.notes_dir)
+	if ok and target then
+		return target
+	end
+	return nil
+end
+
+--- True when the cursor is inside a markdown inline link `[text](url)` or a
+--- wiki-link `[[...]]` on the current line. Used to decide whether
+--- wiki/wiki-link navigation should take precedence over LSP definition
+--- (e.g. on `<C-]>` / `gd` in note buffers).
+M.cursor_on_link = function()
+	local line = vim.api.nvim_get_current_line()
+	local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+
+	local md_start = 1
+	while true do
+		local s, e = line:find("%[([^%]]-)%]%(([^)]-)%)", md_start)
+		if not s then
+			break
+		end
+		if col >= s and col <= e then
+			return true
+		end
+		md_start = e + 1
+	end
+
+	local start_idx = 1
+	while true do
+		local s, e = line:find("(%[%[[^%]]+%]%])", start_idx)
+		if not s then
+			break
+		end
+		if col >= s and col <= e then
+			return true
+		end
+		start_idx = e + 1
+	end
+	return false
+end
+
+--- Follow the wiki/markdown link under the cursor, recording the origin on
+--- the destination window's tag stack first so that `<C-t>` (tag-pop) returns
+--- to where the jump was started -- mirroring LSP `<C-]>` / `gd` behaviour.
+--- Returns true when the cursor is on a link (navigation was attempted);
+--- false otherwise so callers can fall back to LSP go-to-definition.
+M.jump_to_link = function()
+	if not M.cursor_on_link() then
+		return false
+	end
+
+	-- Capture the origin before navigating: getcurpos() ->
+	-- [bufnum, lnum, col, off, curswant], the shape tag `from` expects.
+	local pos = vim.fn.getcurpos()
+	M.follow_wiki_link()
+	vim.schedule(function()
+		local w = vim.api.nvim_get_current_win()
+		if not vim.api.nvim_win_is_valid(w) then
+			return
+		end
+		local stack = vim.fn.gettagstack(w) or {}
+		stack.items = { { tagname = "wiki-link", from = pos } }
+		pcall(vim.fn.settagstack, w, stack, "t")
+	end)
 	return true
 end
 
@@ -1117,11 +1330,41 @@ M.follow_wiki_link = function()
 		end
 	end
 
+	-- 5. Subtask detail fallback (parent/child human body -> on-disk slug file)
+	if not target_path then
+		local ok, res = pcall(tasks_shared.resolve_detail_link, link_title, config.notes_dir)
+		if ok and res then
+			target_path = res
+		end
+	end
+
 	if target_path then
 		open_note_buffer(target_path)
 	else
 		local confirm = vim.fn.confirm("Note '" .. link_title .. "' does not exist. Create it?", "&Yes\n&No", 1)
 		if confirm == 1 then
+			-- A body containing `/` is a subtask hierarchy link (parent/child).
+			-- Route creation through the canonical subtask path so the file lands
+			-- under <notes>/tasks/** with a proper `parent:` reference, matching what
+			-- insert_subtask()/checkbox generation emit -- instead of the generic
+			-- date-shard create that would flatten the body into a single slug.
+			local trimmed_link = vim.trim(link_title)
+			local slash = trimmed_link:find("/", 1, true)
+			if slash then
+				local parent = vim.trim(trimmed_link:sub(1, slash - 1))
+				local child = vim.trim(trimmed_link:sub(slash + 1))
+				if child ~= "" and parent ~= "" then
+					local ok, subtask = pcall(require, "notes.subtask")
+					if ok then
+						local full_path = subtask.ensure_detail_note(child, { parent = parent })
+						if full_path then
+							open_note_buffer(full_path)
+							vim.notify("Task detail created: " .. child, vim.log.levels.INFO)
+							return
+						end
+					end
+				end
+			end
 			local date = os.date(config.date_format)
 			local time = os.date(config.time_format)
 

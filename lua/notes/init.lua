@@ -114,6 +114,85 @@ M.setup = function(opts)
 	local pattern_root = notes_dir .. "/*.md"
 	local pattern_nested = notes_dir .. "/**/*.md"
 
+	-- Given a single line's text and a 0-based column inside it, return the
+	-- trimmed body of the enclosing `[[ ... ]]` pair, or nil when the column is
+	-- not within such a link. string.find offsets are 1-based; col is 0-based.
+	local function enclosing_wiki_body(line, col)
+		local pos = 1
+		while true do
+			local a = line:find("%[%[", pos, false)
+			if not a then
+				return nil
+			end
+			local b = line:find("%]%]", a + 2, false) -- where `]]` starts
+			if not b then
+				return nil
+			end
+			if col >= a - 1 and col <= b + 1 then
+				local body = line:sub(a + 2, b - 1)
+				return body:match("^%s*(.-)%s*$")
+			end
+			pos = b + 2
+		end
+	end
+
+	-- Wraps marksman's publishDiagnostics (installed once) so that in notes
+	-- buffers (paths under the notes dir) the "Link to non-existing document"
+	-- diagnostic is dropped whenever notes.nvim's own resolver can locate the
+	-- parent/child wiki-link target. Genuinely-broken links (unresolvable by our
+	-- resolver too) keep their diagnostic. Navigation is unaffected; other LSP
+	-- clients and non-notes buffers pass through untouched.
+	if not _G.__notes_marksman_diag_patched then
+		_G.__notes_marksman_diag_patched = true
+		local orig_publish = vim.lsp.handlers["textDocument/publishDiagnostics"]
+		vim.lsp.handlers["textDocument/publishDiagnostics"] = function(err, result, ctx, cfg)
+			if not err and result and result.uri then
+				local client = vim.lsp.get_client_by_id(ctx.client_id)
+				local bufnr = vim.uri_to_bufnr(result.uri)
+				local bufname = (vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr)) or ""
+				local norm_name = vim.fn.expand(bufname):gsub("[/\\\\]+", "/")
+				if
+					client
+					and client.name == "marksman"
+					and vim.api.nvim_buf_is_valid(bufnr)
+					and norm_name:sub(1, #notes_dir) == notes_dir
+				then
+					local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) or {}
+					local drop = {}
+						for i, diag in ipairs(result.diagnostics or {}) do
+							if diag and diag.message and diag.range then
+								local ln = diag.range.start.line
+								local linet = lines[ln + 1]
+								-- Only engage for marksman's "target not found" warnings (its wording
+								-- splits across several phrasings), never other diagnostic kinds.
+								local msg = diag.message:lower()
+								local is_missing = msg:find("non-exist", nil, true)
+									or msg:find("not exist", nil, true)
+									or msg:find("not found", nil, true)
+								if is_missing and linet then
+									local body = enclosing_wiki_body(linet, diag.range.start.character)
+									if body and ui.resolve_wiki_link_target(body) then
+										drop[i] = true
+									end
+								end
+							end
+						end
+					if next(drop) then
+						result = vim.deepcopy(result)
+						local kept = {}
+						for i, diag in ipairs(result.diagnostics or {}) do
+							if not drop[i] then
+								table.insert(kept, diag)
+							end
+						end
+						result.diagnostics = kept
+					end
+				end
+			end
+			return orig_publish(err, result, ctx, cfg)
+		end
+	end
+
 	if vim.o.swapfile then
 		local swap_group = vim.api.nvim_create_augroup("NotesSwapExists", { clear = true })
 		vim.api.nvim_create_autocmd("SwapExists", {
@@ -171,10 +250,30 @@ M.setup = function(opts)
 				ui.follow_wiki_link()
 			end, { buffer = ev.buf, desc = "Follow Wiki Link", silent = true })
 
-			-- Bind <CR> to follow wiki link
-			vim.keymap.set("n", "<CR>", function()
-				ui.follow_wiki_link()
-			end, { buffer = ev.buf, desc = "Follow Wiki Link", silent = true })
+			-- Bind <C-]> / gd to follow wiki/inline links when the cursor is on one,
+			-- recording a tag-stack entry so <C-t> returns to the origin (like LSP),
+			-- otherwise fall back to LSP go-to-definition. This keeps markdown links
+			-- (whose targets marksman can't resolve, e.g. subtask parent/child bodies)
+			-- working via notes.nvim's own resolver, while preserving LSP elsewhere.
+			local lsp_definition = function()
+				vim.lsp.buf.definition()
+			end
+			local jump_link_or_lsp = function()
+				if ui.jump_to_link() then
+					return
+				end
+				lsp_definition()
+			end
+			vim.keymap.set("n", "<C-]>", jump_link_or_lsp, {
+				buffer = ev.buf,
+				desc = "Follow Wiki Link / Go to Definition",
+				silent = true,
+			})
+			vim.keymap.set("n", "gd", jump_link_or_lsp, {
+				buffer = ev.buf,
+				desc = "Follow Wiki Link / Go to Definition",
+				silent = true,
+			})
 
 			-- Bind view history to <leader>nh (Normal mode)
 			vim.keymap.set("n", "<leader>nh", function()

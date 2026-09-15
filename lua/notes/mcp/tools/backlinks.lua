@@ -31,6 +31,58 @@ local function link_candidates(note_path, note)
 	return candidates
 end
 
+-- Extract the trimmed body of every `[[...]]` wiki-link in `content`, with
+-- any `|alias` / `#anchor` suffix stripped and backslashes normalized. This
+-- mirrors the normalization `notes.shared.tasks` applies when resolving
+-- subtask detail links, so a link written with internal whitespace (e.g.
+-- `[[ Parent/Child]]`, as `notes.subtask` generates) is still recognized.
+local function extract_link_bodies(content)
+	local bodies = {}
+	local start = 1
+	while true do
+		local s, e, body = content:find("%[%[([^%]]+)%]%]", start)
+		if not s then
+			break
+		end
+		body = (body or ""):gsub("[|#].*$", ""):gsub("\\", "/")
+		body = vim.trim(body)
+		if body ~= "" then
+			table.insert(bodies, body)
+		end
+		start = e + 1
+	end
+	return bodies
+end
+
+-- True when `link_body` points at this target: either an exact match against
+-- one of its title/filename/path candidates, or — matching
+-- `notes.subtask`'s `parent/child` convention — a link whose last `/`-segment
+-- (the child) names this target. Both compare case-insensitively so a
+-- backlink survives minor capitalization drift between the link text and the
+-- target's own title.
+local function link_matches_target(link_body, candidates)
+	local lower = link_body:lower()
+	for _, candidate in ipairs(candidates) do
+		if lower == candidate:lower() then
+			return true
+		end
+	end
+
+	local child = link_body:match("([^/]+)%s*$")
+	if child then
+		child = vim.trim(child):lower()
+		if child ~= "" then
+			for _, candidate in ipairs(candidates) do
+				if child == candidate:lower() then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
 local function handler(args)
 	local path = args.path
 	if not path or path == "" then
@@ -53,19 +105,14 @@ local function handler(args)
 	end
 
 	local candidates = link_candidates(target_path, target)
-	local links = {}
-	for _, candidate in ipairs(candidates) do
-		table.insert(links, "[[" .. candidate .. "]]")
-	end
 
 	local results = {}
 	for _, note in ipairs(scan_notes()) do
 		if vim.fn.resolve(note.path) ~= target_path then
 			local matched_links = {}
-			local content = note.body or ""
-			for _, link in ipairs(links) do
-				if content:find(link, 1, true) then
-					table.insert(matched_links, link)
+			for _, body in ipairs(extract_link_bodies(note.body or "")) do
+				if link_matches_target(body, candidates) then
+					table.insert(matched_links, "[[" .. body .. "]]")
 				end
 			end
 

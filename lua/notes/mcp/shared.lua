@@ -164,4 +164,30 @@ M.normalize_metadata = function(metadata)
 	return out
 end
 
+-- ── Git helpers (synchronous) ───────────────────────────────────────────
+-- notes.git's helpers are callback-based (built for the interactive UI);
+-- an MCP tool handler must return synchronously, so history/diff tools use
+-- these blocking equivalents instead of requiring notes.git.
+
+--- Run a git command against the notes directory and block for the result.
+--- @param args string[] Arguments after `git -C <notes_dir>`.
+--- @return boolean ok, string|nil stdout, string|nil stderr
+M.run_git_sync = function(args)
+	if vim.fn.executable("git") ~= 1 then
+		return false, nil, "git not found"
+	end
+	local cmd = { "git", "-C", M.notes_dir }
+	for _, a in ipairs(args) do
+		table.insert(cmd, a)
+	end
+	local obj = vim.system(cmd, { text = true }):wait()
+	return obj.code == 0, obj.stdout, obj.stderr
+end
+
+--- True when the notes directory is (already) inside a git work tree.
+M.is_git_repo = function()
+	local ok = M.run_git_sync({ "rev-parse", "--is-inside-work-tree" })
+	return ok
+end
+
 return M
