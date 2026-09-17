@@ -173,6 +173,16 @@ M.scan = function(notes_dir)
 										entry.text = md.title
 									end
 								end
+								-- A `[[...]]` is present but didn't resolve to a file: surface the
+								-- raw body so a caller (e.g. an AI agent driving notes_tasks) can
+								-- tell "broken link" apart from "no link was ever written here" --
+								-- both would otherwise look identical (detail simply absent).
+								if not entry.detail then
+									local link_body = line:match("%[%[%s*(.-)%s*%]%]")
+									if link_body then
+										entry.unresolved_link = link_body
+									end
+								end
 							end
 						end
 						table.insert(tasks, entry)
