@@ -101,7 +101,7 @@ end
 
 return {
 	name = "notes_add_subtask",
-	description = "Add a new linked subtask under an existing checklist line: writes a detail note (same shape as notes.subtask.insert_subtask's interactive flow) and inserts a nested `- [ ] [[ parent/title|title]]` line directly beneath the parent task. Identify the parent line with `parent_lnum` (from notes_tasks) or a unique `parent_match` substring.",
+	description = "Add a new linked subtask under an existing checklist line: writes a detail note (same shape as notes.subtask.insert_subtask's interactive flow) and inserts a nested `- [ ] [[ parent/title ]]` line directly beneath the parent task. Identify the parent line with `parent_lnum` (from notes_tasks) or a unique `parent_match` substring.",
 	inputSchema = {
 		type = "object",
 		properties = {

@@ -1,6 +1,23 @@
 -- lua/notes/parser.lua
 local M = {}
 
+-- Strip a value's surrounding quotes. Double-quoted values also get `\"`
+-- un-escaped back to `"`, reversing the escaping M.format_frontmatter applies
+-- on write -- otherwise a title/tag containing a literal quote round-trips
+-- with stray backslashes baked in, breaking exact-string matches downstream
+-- (e.g. notes.shared.tasks.resolve_detail_link).
+local function unquote(val)
+	local inner = val:match('^"(.*)"$')
+	if inner then
+		return (inner:gsub('\\"', '"'))
+	end
+	inner = val:match("^'(.*)'$")
+	if inner then
+		return inner
+	end
+	return val
+end
+
 local function parse_tags(val)
 	if not val or val == "" then
 		return {}
@@ -12,7 +29,7 @@ local function parse_tags(val)
 	end
 	local tags = {}
 	for tag in val:gmatch("[^,]+") do
-		tag = vim.trim(tag):gsub('^"(.*)"$', "%1"):gsub("^'(.*)'$", "%1")
+		tag = unquote(vim.trim(tag))
 		if tag ~= "" then
 			table.insert(tags, tag)
 		end
@@ -48,7 +65,7 @@ M.parse = function(content, filename)
 		local key, val = line:match("^([%w_]+)%s*:%s*(.*)$")
 		if key then
 			key = key:lower()
-			val = vim.trim(val):gsub('^"(.*)"$', "%1"):gsub("^'(.*)'$", "%1")
+			val = unquote(vim.trim(val))
 			if val == "" then
 				current_key = key
 				if key == "tags" or key == "keywords" then
@@ -66,7 +83,7 @@ M.parse = function(content, filename)
 			end
 		elseif current_key and line:match("^%s*-%s+(.*)$") then
 			local item = line:match("^%s*-%s+(.*)$")
-			item = vim.trim(item):gsub('^"(.*)"$', "%1"):gsub("^'(.*)'$", "%1")
+			item = unquote(vim.trim(item))
 			if current_key == "tags" or current_key == "keywords" then
 				table.insert(metadata.tags, item)
 			else
