@@ -30,6 +30,7 @@ local function handler(args)
 				type = t.type,
 				status = t.status,
 				detail = t.detail,
+				unresolved_link = t.unresolved_link,
 			})
 			if limit and limit > 0 and #out >= limit then
 				break
@@ -42,7 +43,7 @@ end
 
 return {
 	name = "notes_tasks",
-	description = "Scan all notes for open tasks: checklist items (`- [ ]` todo, `- [/]`/`- [~]` doing; done items are excluded), inline TODO/ASK markers, and #todo/#tech-debt tags. Mirrors the Notes Home kanban board. Use the returned `lnum` with notes_toggle_task to change a checklist item's status.",
+	description = "Scan all notes for open tasks: checklist items (`- [ ]` todo, `- [/]`/`- [~]` doing; done items are excluded), inline TODO/ASK markers, and #todo/#tech-debt tags. Mirrors the Notes Home kanban board. Use the returned `lnum` with notes_toggle_task to change a checklist item's status. A checklist item's `detail` is its linked detail note's path, if any; if the line carries a `[[...]]` link that could not be resolved to a file, `unresolved_link` holds the raw link body instead so a broken link isn't mistaken for 'no link at all'.",
 	inputSchema = {
 		type = "object",
 		properties = {

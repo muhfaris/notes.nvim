@@ -91,20 +91,25 @@ end
 
 -- Write the detail note for a subtask title if it does not already exist.
 -- Pure on args, never prompts, never overwrites an existing file.
--- Returns the absolute path written, or the existing path, or nil.
+-- Returns the absolute path written, or the existing path, or nil; and a
+-- second boolean: true when a new file was written, false when an
+-- already-existing note (same day, same title slug) was reused instead --
+-- distinguishing the two matters to a caller like notes_add_subtask, since a
+-- silent reuse can mean two different subtasks under different parents just
+-- got linked to the same shared note.
 M.ensure_detail_note = function(title, opts)
 	opts = opts or {}
 	title = vim.trim(title or "")
 	if title == "" then
-		return nil
+		return nil, false
 	end
 
 	local full_path = M.target_path(title)
 	if not full_path then
-		return nil
+		return nil, false
 	end
 	if vim.fn.filereadable(full_path) == 1 then
-		return full_path
+		return full_path, false
 	end
 
 	local dir = vim.fn.fnamemodify(full_path, ":h")
@@ -141,11 +146,11 @@ M.ensure_detail_note = function(title, opts)
 
 	local f = io.open(full_path, "w")
 	if not f then
-		return nil
+		return nil, false
 	end
 	f:write(table.concat(lines, "\n"))
 	f:close()
-	return full_path
+	return full_path, true
 end
 
 -- Render the text of a child checkbox line pointing at a detail note, as a

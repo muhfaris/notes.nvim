@@ -69,7 +69,7 @@ local function handler(args)
 	local subtask = require("notes.subtask")
 	local parent_title = subtask.parent_from_line(parent_line)
 
-	local note_path = subtask.ensure_detail_note(title, { parent = parent_title, source = abs_path })
+	local note_path, note_created = subtask.ensure_detail_note(title, { parent = parent_title, source = abs_path })
 	if not note_path then
 		return encode_checked(encode_json({ error = "could not write the detail note for: " .. title }))
 	end
@@ -95,13 +95,14 @@ local function handler(args)
 		child_lnum = parent_lnum + 1,
 		line = child_text,
 		detail_note = note_path,
+		detail_note_created = note_created,
 		parent_title = parent_title,
 	}))
 end
 
 return {
 	name = "notes_add_subtask",
-	description = "Add a new linked subtask under an existing checklist line: writes a detail note (same shape as notes.subtask.insert_subtask's interactive flow) and inserts a nested `- [ ] [[ parent/title ]]` line directly beneath the parent task. Identify the parent line with `parent_lnum` (from notes_tasks) or a unique `parent_match` substring.",
+	description = "Add a new linked subtask under an existing checklist line: writes a detail note (same shape as notes.subtask.insert_subtask's interactive flow) and inserts a nested `- [ ] [[ parent/title ]]` line directly beneath the parent task. Identify the parent line with `parent_lnum` (from notes_tasks) or a unique `parent_match` substring. `detail_note_created` is false when a note for that exact title already existed for today and was reused instead of created -- check it if you did not intend to share a detail note across subtasks.",
 	inputSchema = {
 		type = "object",
 		properties = {
