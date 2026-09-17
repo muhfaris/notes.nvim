@@ -44,10 +44,13 @@ end
 --- Strip a trailing `[[...]]` detail link from a checklist line's text so
 --- Home's kanban cards and the notes_tasks MCP tool show a readable label
 --- instead of raw wikilink syntax. Our own subtask.lua writes checklist
---- lines as a single aliased link with nothing else beside it
---- (`- [ ] [[ parent/child|child]]`), so when stripping the link leaves
---- nothing behind, fall back to the link's `|alias`, or its last
---- `/`-segment (the child part of `parent/child`).
+--- lines as a single un-aliased link with nothing else beside it
+--- (`- [ ] [[ parent/child ]]`), so when stripping the link leaves nothing
+--- behind, fall back to the link's `|alias` (legacy aliased links), or its
+--- last `/`-segment (the child part of `parent/child`). That segment is only
+--- a guess — M.scan overrides it with the resolved detail note's own title
+--- when one exists, which is what keeps a child title containing a `/`
+--- intact.
 --- @param rest string Line text after the `- [ ]`/`[x]`/`[/]` marker.
 --- @return string
 M.display_task_text = function(rest)
@@ -140,7 +143,7 @@ M.scan = function(notes_dir)
 					title = metadata.title
 				end
 
-				local function push(type_, text, line, status)
+				local function push(type_, text, line, status, rest)
 					if text and text ~= "" then
 						local entry = {
 							path = note_path,
@@ -159,6 +162,17 @@ M.scan = function(notes_dir)
 							local stripped = line:gsub("%[%[[^%]]+%]%]", ""):gsub("%s+$", "")
 							if stripped:find("- [", 1, true) ~= nil then
 								entry.detail = M.detail_path_from_line(note_path, line, notes_dir)
+								-- A link-only label (`- [ ] [[ parent/child ]]`) is ambiguous by
+								-- construction: the child title may itself contain a `/`, so the
+								-- last-segment guess in display_task_text can truncate it. When
+								-- the detail note resolved, its own title is the ground truth.
+								local link_only = vim.trim((rest or ""):gsub("%s*%[%[[^%]]*%]%]%s*$", "")) == ""
+								if entry.detail and link_only then
+									local md = require("notes.parser").read_file(entry.detail)
+									if md and md.title and md.title ~= "" then
+										entry.text = md.title
+									end
+								end
 							end
 						end
 						table.insert(tasks, entry)
@@ -172,9 +186,9 @@ M.scan = function(notes_dir)
 					if boxchar then
 						local text = M.display_task_text(rest:gsub("^%s+", ""))
 						if boxchar == " " and text ~= "" then
-							push("task", text, line, "todo")
+							push("task", text, line, "todo", rest)
 						elseif (boxchar == "/" or boxchar == "~") and text ~= "" then
-							push("task", text, line, "doing")
+							push("task", text, line, "doing", rest)
 						end
 					end
 

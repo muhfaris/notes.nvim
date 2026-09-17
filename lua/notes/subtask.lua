@@ -1,17 +1,19 @@
 --- Task detail-notes: generate an ordinary markdown note for the *detail* of
---- Task detail-notes: generate an ordinary markdown note for the *detail* of
 --- a task / subtask and emit a literal wiki-link back onto its checkbox line.
 ---
 --- Convention (locked with the user):
 ---   * A subtask input is the subtask's *title*, not a summary.
 ---   * A checklist line carries its detail-note link as a single Obsidian-style
----     aliased wikilink `[[ parent/child|child]]` — the `parent/child` body is
----     what resolution (M.resolve_detail_link, notes_backlinks) matches
----     against, and the `|child` alias is what markview renders/conceals, so
----     the line reads as just the child title with no separate duplicated
----     plain-text title beside the link:
+---     wikilink `[[ parent/child ]]`, padded with one space inside the
+---     brackets, and *without* an alias — the `parent/child` body is what
+---     resolution (M.resolve_detail_link, notes_backlinks) matches against, so
+---     the line carries no separate plain-text title duplicated beside the
+---     link:
 ---         - [ ] Login Module
----           - [ ] [[ Login Module/Fixing code oauth|Fixing code oauth]]
+---           - [ ] [[ Login Module/Fixing code oauth ]]
+---   * Lines written before this convention carried a `|child` alias instead;
+---     the readers (M.parent_from_line, shared.tasks.display_task_text,
+---     notes_backlinks) still strip one, so those lines keep resolving.
 ---   * The detail note is an ordinary markdown file under
 ---     <notes_dir>/tasks/<yyyy>/<mm>/<yyyy-mm-dd>-<slug>.md , storing the
 ---     child in `title` plus a `parent` frontmatter reference.
@@ -147,19 +149,16 @@ M.ensure_detail_note = function(title, opts)
 end
 
 -- Render the text of a child checkbox line pointing at a detail note, as a
--- single aliased wikilink `[[ parent/child|child]]` (see the file-level
+-- single un-aliased wikilink `[[ parent/child ]]` (see the file-level
 -- convention comment) rather than a plain-text title duplicated next to the
--- link.
+-- link. The body already ends in the child title, so an alias would only
+-- repeat it.
 M.render_child_line = function(child_title, parent_title, indentation)
 	local body = M.link_body(child_title, parent_title)
 	if body == "" then
 		return nil
 	end
-	local label = vim.trim(child_title or "")
-	if label == "" then
-		return nil
-	end
-	return string.format("%s- [ ] [[ %s|%s]]", indentation or "", body, label)
+	return string.format("%s- [ ] [[ %s ]]", indentation or "", body)
 end
 
 
@@ -169,9 +168,9 @@ end
 -- title left.
 --
 -- A line may carry NO plain text at all beside its link — our own
--- render_child_line writes `- [ ] [[ parent/child|child]]` with nothing
--- before the bracket, which matters when nesting a subtask under an
--- already-linked child line. In that case fall back to the link's `|alias`,
+-- render_child_line writes `- [ ] [[ parent/child ]]` with nothing before the
+-- bracket, which matters when nesting a subtask under an already-linked child
+-- line. In that case fall back to the link's `|alias` (legacy aliased links),
 -- or its last `/`-segment (the child part of `parent/child`), so a title is
 -- still recovered.
 M.parent_from_line = function(line)

@@ -1214,7 +1214,9 @@ M.follow_wiki_link = function()
 			break
 		end
 		if col >= s and col <= e then
-			link_title = match:sub(3, -3)
+			-- Trim the padding our own checklist links carry (`[[ body ]]`) so the
+			-- path/title/frontmatter match stages below see the bare body too.
+			link_title = vim.trim(match:sub(3, -3))
 			break
 		end
 		start_idx = e + 1

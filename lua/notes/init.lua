@@ -163,12 +163,18 @@ M.setup = function(opts)
 							if diag and diag.message and diag.range then
 								local ln = diag.range.start.line
 								local linet = lines[ln + 1]
-								-- Only engage for marksman's "target not found" warnings (its wording
-								-- splits across several phrasings), never other diagnostic kinds.
+								-- Only engage for marksman's "target not found"/"ambiguous target"
+								-- warnings (its wording splits across several phrasings), never other
+								-- diagnostic kinds. "Ambiguous" fires on titles shaped like "Prefix:
+								-- Rest" (e.g. "CR: Bau 2.11 - Masking Data Customer"): marksman also
+								-- indexes such docs under the bare "Rest" suffix, so any other doc or
+								-- heading resolving to that suffix makes it call the link ambiguous,
+								-- even though our own resolver finds one unambiguous target.
 								local msg = diag.message:lower()
 								local is_missing = msg:find("non-exist", nil, true)
 									or msg:find("not exist", nil, true)
 									or msg:find("not found", nil, true)
+									or msg:find("ambiguous", nil, true)
 								if is_missing and linet then
 									local body = enclosing_wiki_body(linet, diag.range.start.character)
 									if body and ui.resolve_wiki_link_target(body) then
