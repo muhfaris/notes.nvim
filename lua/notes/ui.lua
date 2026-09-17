@@ -1083,6 +1083,11 @@ end
 --- ` parent/child`) body via the tasks/** title search.
 M.resolve_wiki_link_target = function(link_body)
 	local body = vim.trim(link_body or "")
+	-- `|alias` (a supported alternative form, see notes.subtask) and `#anchor` are
+	-- presentation, not part of the target: strip them before the filename/title
+	-- stages so an aliased body matches on its path instead of silently falling
+	-- through to the last-resort detail search, which strips them itself.
+	body = vim.trim((body:gsub("[|#].*$", "")))
 	if body == "" then
 		return nil
 	end
@@ -1214,9 +1219,11 @@ M.follow_wiki_link = function()
 			break
 		end
 		if col >= s and col <= e then
-			-- Trim the padding our own checklist links carry (`[[ body ]]`) so the
-			-- path/title/frontmatter match stages below see the bare body too.
-			link_title = vim.trim(match:sub(3, -3))
+			-- Trim the padding our own checklist links carry (`[[ body ]]`) and drop a
+			-- `|alias`/`#anchor`, so the path/title/frontmatter match stages below see
+			-- the bare body too. The alias is a supported alternative form, not a
+			-- legacy one (see notes.subtask).
+			link_title = vim.trim((match:sub(3, -3):gsub("[|#].*$", "")))
 			break
 		end
 		start_idx = e + 1

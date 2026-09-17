@@ -11,7 +11,7 @@
 - **🗂️ Interactive Explorer Sidebar**: A visual dashboard (`notes://explorer`) grouping notes by Year and Month. Navigate, rename, delete, or create notes directly from the panel.
 - **🧮 Standard YAML Frontmatter**: Parses and writes frontmatter variables (`title`, `date`, `tags`, `summary`) automatically. Legacy note formats are read seamlessly via automatic fallback parsing.
 - **🔗 Inter-note Wiki-Links**: Press `<CR>` on any `[[Linked Note]]` or `[[2026-07-10]]` to jump to it instantly. If the linked note doesn't exist, the plugin prompts to create it.
-- **☑️ Task Checklists**: Easily toggle markdown checkbox items (`- [ ]` / `- [x]`) using `<leader>nt` (buffer-local, fully customizable).
+- **☑️ Task Checklists**: Easily toggle markdown checkbox items (`- [ ]` / `- [x]`) using `<leader>nt` (buffer-local, fully customizable). `<leader>nta` nests a subtask under the current task and gives it its own detail note, linked as `- [ ] [[ Parent/Child ]]`. Write the alias form `- [ ] [[ Parent/Child|label ]]` when a line should read differently from the child's title — the label wins over the resolved title, and the link still resolves normally.
 - **🖼️ Portable Clipboard Image Pasting**: Paste images directly from your clipboard across Linux (X11 & Wayland), macOS, and Windows. Saves files into `notes_dir/images/` and links them with portable relative paths (`images/image.png`).
 - **🔍 Telescope Integration**: Fuzzy find notes by title/tags/date via a clean column-based Telescope list (`:Notes list`), or live grep inside content (`:Notes search`).
 - **🧮 Markdown Table Math**: Excel-like cell calculation (`=SUM(A1:A3)`, `=AVG(...)`, arithmetic operations) overlaid via non-destructive virtual text. Updates automatically on save and mode changes.
@@ -87,13 +87,36 @@ Call it again (or `q`) to close it. It hosts like a welcome/home screen:
   window** as a welcome screen.
 * Otherwise it opens in a **new tab page** so it never interferes with what you're editing.
 
-* `<CR>` on a task line: open that note in a new split at the task's line.
+**Sections**
+
+* **📌 Pinned** — notes with `pinned: true` in their frontmatter, newest first
+  (up to 8). Nothing else pins a note, and the section says so when it is empty.
+* **📌 Recently Modified** — from the same MRU state that powers the
+  `notes_recent` MCP tool (up to 8).
+* **Lanes** — `🔁 In Progress`, `📝 Todo`, `❓ Ask`, `🔖 TODO / tags`. A checklist
+  card lands in a lane by its own checkbox (`[/]`/`[~]` in progress, `[ ]` todo);
+  inline `TODO`/`ASK` markers and `#todo`/`#tech-debt` tags fill the last two.
+  `[x]` items never become cards.
+* **🚀 Quick Actions** — the key hints at the bottom of the dashboard.
+
+**Keys**
+
+* `<CR>` on a pinned, recent, or task row: open that note in a new split. On a
+  task that carries a linked detail note (`- [ ] [[ Parent/Child ]]`), it opens
+  the **detail note** instead — the board it hangs off is one hop away via the
+  detail's `source_note` frontmatter or `<C-o>`.
+* `p` / `x` / `b` on a lane card: promote a todo to in-progress, complete an
+  in-progress task, or send one back to todo. Home rewrites just that line —
+  editing an already-open buffer and saving it (so unsaved edits survive)
+  rather than reading the file fresh — and stamps the linked detail note's own
+  `status` frontmatter to match, the same call the `notes_toggle_task` MCP tool
+  makes.
 * `n`: new note · `d`: daily · `s`: search · `t`: tasks picker · `r`: refresh · `q`: close
-* Sections are color-coded and icon-led (`📚` title, `📌` recent, `📝` tasks, `🚀` actions).
-  Override the highlight groups `NotesHomeTitle`, `NotesHomeHeadRecent`,
-  `NotesHomeHeadTasks`, `NotesHomeHeadActions`, `NotesHomeRecentBody`,
-  `NotesHomeTaskBody`, `NotesHomeMuted` to restyle.
-* Recent notes come from the same MRU state that powers the `notes_recent` MCP tool.
+* Sections are color-coded and icon-led (`📚` title, `📌` pinned/recent, `📝` tasks, `🚀` actions).
+  Override the highlight groups `NotesHomeTitle`, `NotesHomeHeadPinned`,
+  `NotesHomeHeadRecent`, `NotesHomeHeadTasks`, `NotesHomeHeadActions`,
+  `NotesHomeRecentBody`, `NotesHomePinnedBody`, `NotesHomeTaskBody`,
+  `NotesHomeDoingBody`, `NotesHomeAskBody`, `NotesHomeMuted` to restyle.
 
 ## 🗂️ Notes Explorer Sidebar
 
@@ -346,12 +369,20 @@ The server registers the following tools:
 | `notes_delete` | Delete a note or directory by path (relative or absolute). | `path` | — |
 | `notes_update` | Update an existing note's content and/or frontmatter fields (title, tags, summary, date, custom fields). Omitted fields are preserved. | `path` | `content`, `title`, `tags`, `summary`, `date`, `metadata` |
 | `notes_recent` | Most recently opened/edited notes. `current` is the last-accessed note; `recent` is newest-first with path, title, date. Refreshed from your live session via the MRU state file. | — | `limit` |
+| `notes_tasks` | Scan all notes for open tasks: checklist items (`- [ ]` todo, `- [/]`/`- [~]` doing; done excluded), inline `TODO`/`ASK` markers, and `#todo`/`#tech-debt` tags. Mirrors the Notes Home kanban board; the returned `lnum` feeds `notes_toggle_task`. | — | `type`, `status`, `limit` |
+| `notes_toggle_task` | Atomically change one checklist task's status (`todo` → `- [ ]`, `doing` → `- [/]`, `done` → `- [x]`) by rewriting only that line. Stamps a linked detail note's `status` frontmatter to match. | `path`, `status` | `lnum`, `match` |
+| `notes_add_subtask` | Add a linked subtask under an existing checklist line: writes a detail note and inserts a nested `- [ ] [[ parent/title ]]` line beneath the parent. `detail_note_created` is `false` when a note for that exact title was reused. | `path`, `title` | `parent_lnum`, `parent_match` |
+| `notes_board_status` | Roll up checklist status counts (todo/doing/done) for one note, grouped by its markdown headings — answers "what's left" on a weekly/board note without reading it. | `path` | — |
+| `notes_rollover_tasks` | Create a new note carrying forward every not-done checklist item from an existing board note, keeping each item's heading and parent-task context. | `from_path`, `title` | `directory`, `tags` |
+| `notes_history` | Git commit history for a note (hash, author, date, subject, lines added/removed), or vault-wide when `path` is omitted. Pass a commit's `hash` to `notes_diff`. | — | `path`, `limit` |
+| `notes_diff` | Show the git diff introduced by a commit (hash from `notes_history`), optionally scoped to one note's path. | `commit` | `path` |
 
 ### Notes on behavior
 
 - **Path resolution**: Relative paths are resolved against your `notes_dir`; absolute paths are used as-is.
 - **Templates excluded**: Files under `notes_dir/templates/` are skipped during listing and search, keeping your workspace clean.
 - **Fallback dates**: Notes without a `date` in frontmatter report their file modification time.
+- **Git tools need a repo**: `notes_history` and `notes_diff` read via `git -C <notes_dir>` and report an error when the notes directory is not a git work tree; the rest of the server is unaffected.
 - **Protocol**: Implements MCP protocol version `2024-11-05` with `tools/list` and `tools/call` support, advertising itself as `notes-mcp` v`0.1.0`.
 
 ---

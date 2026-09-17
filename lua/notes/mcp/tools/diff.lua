@@ -7,15 +7,7 @@
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local resolve_path = shared.resolve_path
-local notes_dir = shared.notes_dir
-
-local function relative_path(abs_path)
-	if abs_path:sub(1, #notes_dir) == notes_dir then
-		local rel = abs_path:sub(#notes_dir + 2)
-		return rel ~= "" and rel or nil
-	end
-	return nil
-end
+local relative_path = shared.relative_path
 
 local function handler(args)
 	if not args.commit or args.commit == "" then

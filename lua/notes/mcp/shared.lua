@@ -190,4 +190,18 @@ M.is_git_repo = function()
 	return ok
 end
 
+--- Path of `abs_path` relative to the notes directory, or nil when it lives
+--- outside it. The separator is part of the check, so a sibling directory that
+--- merely shares a prefix (`/v/notes-old/x.md` vs `/v/notes`) is not a hit.
+--- @param abs_path string
+--- @return string|nil
+M.relative_path = function(abs_path)
+	local prefix = M.notes_dir .. "/"
+	if abs_path:sub(1, #prefix) ~= prefix then
+		return nil
+	end
+	local rel = abs_path:sub(#prefix + 1)
+	return rel ~= "" and rel or nil
+end
+
 return M

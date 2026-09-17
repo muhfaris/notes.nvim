@@ -12,6 +12,8 @@
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local resolve_path = shared.resolve_path
+-- Checklist grammar is owned by notes.shared.tasks.
+local tasks_shared = require("notes.shared.tasks")
 
 local function handler(args)
 	if not args.from_path or args.from_path == "" then
@@ -43,14 +45,16 @@ local function handler(args)
 	local indent_of = {}
 	local stack = {} -- ancestor task-line indices, outermost first
 	for i, line in ipairs(lines) do
-		local indent, box = line:match("^(%s*)[-*]%s*%[(.)%]")
-		if box then
-			indent_of[i] = #indent
-			while #stack > 0 and indent_of[stack[#stack]] >= #indent do
+		local parsed = tasks_shared.parse_task_line(line)
+		if parsed then
+			local width = #parsed.indent
+			indent_of[i] = width
+			while #stack > 0 and indent_of[stack[#stack]] >= width do
 				table.remove(stack)
 			end
-			local not_done = box == " " or box == "/" or box == "~"
-			if not_done then
+			-- The whitelist matters: an unrecognized box is not carried, so a
+			-- `- [!]` line is never mistaken for still-open work.
+			if tasks_shared.is_open_box(parsed.box) then
 				keep[i] = true
 				for _, anc in ipairs(stack) do
 					keep[anc] = true

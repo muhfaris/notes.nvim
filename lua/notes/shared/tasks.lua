@@ -3,15 +3,102 @@
 --- items, inline TODO/ASK markers, and #todo / #tech-debt tags. Used by the
 --- Telescope task picker (ui.lua) and the home dashboard (home.lua) so the
 --- detection logic lives in one place.
+---
+--- This module also owns the *checklist-line grammar* — M.parse_task_line,
+--- M.is_task_line, M.box_status, M.status_box, M.is_open_box, M.set_box — so
+--- every reader and writer of a `- [ ] ...` line (Home's persist_card, the
+--- subtask helper, the MCP tools) shares one pattern and one box map instead
+--- of each re-listing the glyphs.
 
 local M = {}
 
 -- Sort order across task types (lower sorts first)
 M.order = { task = 1, todo = 2, ask = 3, ["#todo"] = 4, ["#tech-debt"] = 5 }
 
--- Checkbox states for a `task` entry. Scan emits only not-started (`[ ]`) and
--- in-progress (`[/]` or `[~]`); done (`[x]`/`[X]`) never becomes a card.
-M.statuses = { todo = "todo", doing = "doing" }
+-- ── Checklist line grammar ────────────────────────────────────────────
+-- The one place a checklist line is spelled out. A new box glyph or bullet
+-- style is added here, not in nine hand-rolled patterns.
+
+-- Box glyph this plugin *writes* for each status (Home's p/x/b keys,
+-- notes_toggle_task), and the boxes it *recognizes* when reading. `~` is
+-- accepted as an alias of `/` for in-progress work; `X` as done.
+M.boxes = { todo = " ", doing = "/", done = "x" }
+local DOING_BOXES = { ["/"] = true, ["~"] = true }
+local DONE_BOXES = { ["x"] = true, ["X"] = true }
+
+-- Every box character that names one of our states. Deliberately narrower
+-- than "any character between brackets": this is the set an action may fire
+-- on, so an unclassifiable `- [!]` line does not qualify.
+M.KNOWN_BOXES = { [" "] = true, x = true, X = true, ["/"] = true, ["~"] = true, ["-"] = true }
+
+--- Status a box character stands for, or nil when the box is unrecognized.
+--- @param box string Single character captured from between the brackets.
+--- @return string|nil "todo" | "doing" | "done"
+M.box_status = function(box)
+	if box == " " then
+		return "todo"
+	end
+	if DOING_BOXES[box] then
+		return "doing"
+	end
+	if DONE_BOXES[box] then
+		return "done"
+	end
+	return nil
+end
+
+--- Box character a writer should emit for a status name — the inverse of
+--- M.box_status, and the only place the written glyphs are chosen.
+--- @param status string "todo" | "doing" | "done"
+--- @return string|nil
+M.status_box = function(status)
+	return M.boxes[status]
+end
+
+--- True for the boxes that name an *open* task: not-started or in-progress.
+--- The whitelist is the point — an unrecognized box counts as closed, so
+--- neither the scanner nor a rollover resurrects a line it cannot classify.
+--- @param box string
+--- @return boolean
+M.is_open_box = function(box)
+	local status = M.box_status(box)
+	return status == "todo" or status == "doing"
+end
+
+--- Split a checklist line into its parts, or nil when the line is not one
+--- (`- [ ]`, `* [/]`, any indent, any box character). The box is *captured*
+--- rather than tested, so callers classify with M.box_status instead of each
+--- re-listing the glyphs.
+--- @param line string
+--- @return table|nil { indent = string, box = string, rest = string }
+M.parse_task_line = function(line)
+	local indent, box, rest = line:match("^(%s*)[-*]%s*%[(.)%](.*)$")
+	if not box then
+		return nil
+	end
+	return { indent = indent, box = box, rest = rest }
+end
+
+--- True when a line is a checklist item carrying one of our known boxes.
+--- Stricter than M.parse_task_line on purpose: this is the guard deciding
+--- "may an action fire on this line", where `- [!]` or `- [?]` should not pass.
+--- @param line string
+--- @return boolean
+M.is_task_line = function(line)
+	local parsed = M.parse_task_line(line)
+	return parsed ~= nil and M.KNOWN_BOXES[parsed.box] == true
+end
+
+--- Rewrite the box character of the first checklist item on `line`. `box` is
+--- the raw glyph (" ", "/", "~", "x", "X"), so a status change and a
+--- box-to-box rewrite share this one gsub. `[^]]` rather than `[^)%]]` is what
+--- keeps the class from also excluding a legitimate `)` or swallowing `]`.
+--- @param line string
+--- @param box string Replacement glyph.
+--- @return string
+M.set_box = function(line, box)
+	return (line:gsub("(%s*[-*]%s*%[)([^]])(%])", "%1" .. box .. "%3", 1))
+end
 
 --- Match an inline TODO/ASK-style marker at the start of the line
 --- (`- KEYWORD: text` or `KEYWORD: text`) or at the end (`text :KEYWORD`),
@@ -46,11 +133,13 @@ end
 --- instead of raw wikilink syntax. Our own subtask.lua writes checklist
 --- lines as a single un-aliased link with nothing else beside it
 --- (`- [ ] [[ parent/child ]]`), so when stripping the link leaves nothing
---- behind, fall back to the link's `|alias` (legacy aliased links), or its
---- last `/`-segment (the child part of `parent/child`). That segment is only
---- a guess — M.scan overrides it with the resolved detail note's own title
---- when one exists, which is what keeps a child title containing a `/`
---- intact.
+--- behind, fall back to the link's `|alias`, or its last `/`-segment (the
+--- child part of `parent/child`). The `|alias` form is a supported
+--- alternative, not a legacy one: it lets an author give a checklist line a
+--- shorter label than the child title, and that label wins here — M.scan only
+--- substitutes the resolved detail note's own title when the link carries no
+--- alias. That segment fallback is only a guess, which is what keeps a child
+--- title containing a `/` intact.
 --- @param rest string Line text after the `- [ ]`/`[x]`/`[/]` marker.
 --- @return string
 M.display_task_text = function(rest)
@@ -157,31 +246,38 @@ M.scan = function(notes_dir)
 							entry.status = status
 						end
 						-- For checkbox tasks, expose a linked detail note so Home and the
-						-- task picker can jump into it directly.
+						-- task picker can jump into it directly. Reachable only from the
+						-- checkbox branch above, so `type_ == "task"` is itself the "this is
+						-- a checklist line" proof — never re-derive it from the raw text (a
+						-- literal `- [` test silently dropped `* [ ]` bullets).
 						if type_ == "task" then
-							local stripped = line:gsub("%[%[[^%]]+%]%]", ""):gsub("%s+$", "")
-							if stripped:find("- [", 1, true) ~= nil then
-								entry.detail = M.detail_path_from_line(note_path, line, notes_dir)
-								-- A link-only label (`- [ ] [[ parent/child ]]`) is ambiguous by
-								-- construction: the child title may itself contain a `/`, so the
-								-- last-segment guess in display_task_text can truncate it. When
-								-- the detail note resolved, its own title is the ground truth.
-								local link_only = vim.trim((rest or ""):gsub("%s*%[%[[^%]]*%]%]%s*$", "")) == ""
-								if entry.detail and link_only then
-									local md = require("notes.parser").read_file(entry.detail)
-									if md and md.title and md.title ~= "" then
-										entry.text = md.title
-									end
+							entry.detail = M.detail_path_from_line(note_path, line, notes_dir)
+							-- A link-only label (`- [ ] [[ parent/child ]]`) is ambiguous by
+							-- construction: the child title may itself contain a `/`, so the
+							-- last-segment guess in display_task_text can truncate it. When the
+							-- detail note resolved, its own title is the ground truth -- unless
+							-- the author wrote an explicit `|alias` (a supported alternative),
+							-- whose label is theirs to keep.
+							local trailing = (rest or ""):match("%[%[%s*(.-)%s*%]%]%s*$")
+							local alias = trailing and trailing:match("|%s*(.-)%s*$")
+							if alias == "" then
+								alias = nil
+							end
+							local link_only = vim.trim(((rest or ""):gsub("%s*%[%[[^%]]*%]%]%s*$", ""))) == ""
+							if entry.detail and link_only and not alias then
+								local md = require("notes.parser").read_file(entry.detail)
+								if md and md.title and md.title ~= "" then
+									entry.text = md.title
 								end
-								-- A `[[...]]` is present but didn't resolve to a file: surface the
-								-- raw body so a caller (e.g. an AI agent driving notes_tasks) can
-								-- tell "broken link" apart from "no link was ever written here" --
-								-- both would otherwise look identical (detail simply absent).
-								if not entry.detail then
-									local link_body = line:match("%[%[%s*(.-)%s*%]%]")
-									if link_body then
-										entry.unresolved_link = link_body
-									end
+							end
+							-- A `[[...]]` is present but didn't resolve to a file: surface the
+							-- raw body so a caller (e.g. an AI agent driving notes_tasks) can
+							-- tell "broken link" apart from "no link was ever written here" --
+							-- both would otherwise look identical (detail simply absent).
+							if not entry.detail then
+								local link_body = line:match("%[%[%s*(.-)%s*%]%]")
+								if link_body then
+									entry.unresolved_link = link_body
 								end
 							end
 						end
@@ -190,16 +286,12 @@ M.scan = function(notes_dir)
 				end
 
 				for line in file:lines() do
-					-- 1. Checkbox task. Capture the box char: ` ` -> todo,
-					--    `/` or `~` -> in-progress; any other (x/X) skipped.
-					local boxchar, rest = line:match("^%s*[-*]%s*%[(.)%](.*)$")
-					if boxchar then
-						local text = M.display_task_text(rest:gsub("^%s+", ""))
-						if boxchar == " " and text ~= "" then
-							push("task", text, line, "todo", rest)
-						elseif (boxchar == "/" or boxchar == "~") and text ~= "" then
-							push("task", text, line, "doing", rest)
-						end
+					-- 1. Checkbox task. The box char decides the status; any box we
+					--    cannot classify (done included) is simply not a card.
+					local parsed = M.parse_task_line(line)
+					if parsed and M.is_open_box(parsed.box) then
+						local text = M.display_task_text(parsed.rest:gsub("^%s+", ""))
+						push("task", text, line, M.box_status(parsed.box), parsed.rest)
 					end
 
 					-- 2. Inline TODO marker: "- TODO: text" / "TODO: text" / "text :todo"
@@ -270,7 +362,10 @@ M.resolve_detail_link = function(body, notes_dir)
 	local norm_lower = norm:lower()
 
 	local parser = require("notes.parser")
-	local files = vim.fn.globpath(notes_dir .. "/tasks", "**/*.md", false, true)
+	-- Detail notes live under the tasks subtree owned by notes.subtask;
+	-- required lazily so this module keeps no load-order dependency on it.
+	local tasks_dir = notes_dir .. "/" .. require("notes.subtask").rel_dir
+	local files = vim.fn.globpath(tasks_dir, "**/*.md", false, true)
 	if #files == 0 then
 		return nil
 	end

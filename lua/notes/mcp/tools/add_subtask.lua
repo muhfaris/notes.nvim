@@ -9,8 +9,9 @@
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local resolve_path = shared.resolve_path
-
-local TASK_LINE_PATTERN = "^%s*[-*]%s*%[[ xX/~%-]%]"
+-- The task-line predicate is owned by notes.shared.tasks, so this tool and the
+-- interactive subtask flow agree on what may carry a child.
+local tasks_shared = require("notes.shared.tasks")
 
 local function handler(args)
 	if not args.path or args.path == "" then
@@ -44,7 +45,7 @@ local function handler(args)
 		end
 		local found = {}
 		for i, l in ipairs(lines) do
-			if l:match(TASK_LINE_PATTERN) and l:find(args.parent_match, 1, true) then
+			if tasks_shared.is_task_line(l) and l:find(args.parent_match, 1, true) then
 				table.insert(found, { lnum = i, line = l })
 			end
 		end
@@ -60,7 +61,7 @@ local function handler(args)
 	end
 
 	local parent_line = lines[parent_lnum]
-	if not parent_line or not parent_line:match(TASK_LINE_PATTERN) then
+	if not parent_line or not tasks_shared.is_task_line(parent_line) then
 		return encode_checked(encode_json({
 			error = "line " .. tostring(parent_lnum) .. " is not a checklist task line",
 		}))

@@ -11,9 +11,12 @@
 ---     link:
 ---         - [ ] Login Module
 ---           - [ ] [[ Login Module/Fixing code oauth ]]
----   * Lines written before this convention carried a `|child` alias instead;
----     the readers (M.parent_from_line, shared.tasks.display_task_text,
----     notes_backlinks) still strip one, so those lines keep resolving.
+---   * An alias (`[[ parent/child|shorter label ]]`) is a *supported
+---     alternative*, not a legacy format: `render_child_line` emits the
+---     un-aliased form by default, but a hand-written alias keeps its own
+---     label as the line's display text and still resolves to the same detail
+---     note. The readers (M.parent_from_line, shared.tasks.display_task_text,
+---     notes_backlinks, ui.resolve_wiki_link_target) strip it before resolving.
 ---   * The detail note is an ordinary markdown file under
 ---     <notes_dir>/tasks/<yyyy>/<mm>/<yyyy-mm-dd>-<slug>.md , storing the
 ---     child in `title` plus a `parent` frontmatter reference.
@@ -26,6 +29,9 @@ local M = {}
 
 local utils = require("notes.utils")
 local config = require("notes.config").get_config()
+-- The checklist-line grammar lives in notes.shared.tasks (one pattern, one box
+-- map) so this module and the MCP tools cannot drift on what a task line is.
+local tasks_shared = require("notes.shared.tasks")
 
 -- Detail notes live in a date-sharded "tasks" subtree, grouped like dailies.
 M.rel_dir = "tasks"
@@ -156,8 +162,9 @@ end
 -- Render the text of a child checkbox line pointing at a detail note, as a
 -- single un-aliased wikilink `[[ parent/child ]]` (see the file-level
 -- convention comment) rather than a plain-text title duplicated next to the
--- link. The body already ends in the child title, so an alias would only
--- repeat it.
+-- link. The body already ends in the child title, so the generated line never
+-- carries an alias -- an alias stays available as a hand-written alternative
+-- when a line should read differently from the child title.
 M.render_child_line = function(child_title, parent_title, indentation)
 	local body = M.link_body(child_title, parent_title)
 	if body == "" then
@@ -175,32 +182,20 @@ end
 -- A line may carry NO plain text at all beside its link — our own
 -- render_child_line writes `- [ ] [[ parent/child ]]` with nothing before the
 -- bracket, which matters when nesting a subtask under an already-linked child
--- line. In that case fall back to the link's `|alias` (legacy aliased links),
--- or its last `/`-segment (the child part of `parent/child`), so a title is
--- still recovered.
+-- line. That fallback (the `|alias`, else the last `/`-segment of
+-- `parent/child`) is owned by notes.shared.tasks.display_task_text, so this
+-- function and Home's kanban cards can never disagree about which label wins.
 M.parent_from_line = function(line)
-	local after_marker = (line or ""):gsub("^%s*[-*]%s*%[[ xX/~%-]%]%s*", "")
-	local link_body = after_marker:match("%[%[%s*(.-)%s*%]%]%s*$")
-	local text = vim.trim((after_marker:gsub("%s*%[%[[^%]]*%]%]%s*$", "")))
-	if text ~= "" then
-		return text
-	end
-	if link_body then
-		local alias = link_body:match("|%s*(.-)%s*$")
-		if alias and alias ~= "" then
-			return alias
-		end
-		local child = vim.trim((link_body:gsub("|.*$", ""):match("([^/]+)%s*$") or ""))
-		if child ~= "" then
-			return child
-		end
-	end
-	return nil
+	local parsed = tasks_shared.parse_task_line(line)
+	local text = vim.trim(tasks_shared.display_task_text(parsed and parsed.rest or (line or "")))
+	return text ~= "" and text or nil
 end
 
--- True when a line looks like a checklist/task item (- [ ], * [ ], any indent, any marker).
+-- True when a line is a checklist item carrying a known box (`- [ ]`, `* [/]`,
+-- any indent). Delegates to the shared predicate so this module, the Home
+-- dashboard and the MCP tools answer the question identically.
 M.is_task_line = function(line)
-	return line:match("^%s*[-*]%s*%[[ xX/~%-]%]") ~= nil
+	return tasks_shared.is_task_line(line)
 end
 
 

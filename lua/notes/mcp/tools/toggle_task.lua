@@ -11,29 +11,16 @@ local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local resolve_path = shared.resolve_path
 local notes_dir = shared.notes_dir
 
-local STATUS_BOX = { todo = " ", doing = "/", done = "x" }
-local TASK_LINE_PATTERN = "^%s*[-*]%s*%[[ xX/~%-]%]"
-
--- Best-effort: if the task line links to a detail note (notes.subtask's
--- convention), stamp that note's own `status` frontmatter field too, so it
--- stays self-describing without needing the parent board reopened. Never
--- fails the toggle itself — a missing/unlinked detail note is normal.
--- Shared with notes.home's persist_card (notes.shared.tasks.sync_detail_status)
--- so a status change behaves identically from the AI or the Home dashboard.
-local function sync_detail_status(board_path, fixed_line, status)
-	local ok_tasks, tasks_mod = pcall(require, "notes.shared.tasks")
-	if not ok_tasks then
-		return nil, false
-	end
-	return tasks_mod.sync_detail_status(board_path, fixed_line, notes_dir, status)
-end
+-- Checklist grammar (box map, task-line predicate, box rewriter) comes from
+-- notes.shared.tasks so this tool and Home's persist_card cannot drift.
+local tasks_shared = require("notes.shared.tasks")
 
 local function handler(args)
 	if not args.path or args.path == "" then
 		return encode_checked(encode_json({ error = "path is required" }))
 	end
 
-	local box = STATUS_BOX[args.status]
+	local box = tasks_shared.status_box(args.status)
 	if not box then
 		return encode_checked(encode_json({ error = "status must be one of: todo, doing, done" }))
 	end
@@ -59,7 +46,7 @@ local function handler(args)
 		end
 		local found = {}
 		for i, l in ipairs(lines) do
-			if l:match(TASK_LINE_PATTERN) and l:find(args.match, 1, true) then
+			if tasks_shared.is_task_line(l) and l:find(args.match, 1, true) then
 				table.insert(found, { lnum = i, line = l })
 			end
 		end
@@ -75,13 +62,13 @@ local function handler(args)
 	end
 
 	local line = lines[target_lnum]
-	if not line or not line:match(TASK_LINE_PATTERN) then
+	if not line or not tasks_shared.is_task_line(line) then
 		return encode_checked(encode_json({
 			error = "line " .. tostring(target_lnum) .. " is not a checklist task line",
 		}))
 	end
 
-	local fixed = line:gsub("(%s*[-*]%s*%[)([^%]])(%])", "%1" .. box .. "%3", 1)
+	local fixed = tasks_shared.set_box(line, box)
 	if fixed == line then
 		return encode_checked(encode_json({ error = "failed to update checkbox on line " .. target_lnum }))
 	end
@@ -94,7 +81,11 @@ local function handler(args)
 	fw:write(table.concat(lines, "\n"))
 	fw:close()
 
-	local detail_path, detail_synced = sync_detail_status(abs_path, fixed, args.status)
+	-- Best-effort: stamp a linked detail note's own `status` frontmatter too, so
+	-- it stays self-describing. Never fails the toggle itself — a missing or
+	-- unlinked detail note is normal. Same call Home's persist_card makes, so a
+	-- status change reads identically from an AI agent or the dashboard.
+	local detail_path, detail_synced = tasks_shared.sync_detail_status(abs_path, fixed, notes_dir, args.status)
 
 	return encode_checked(encode_json({
 		success = true,

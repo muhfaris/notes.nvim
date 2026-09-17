@@ -7,6 +7,8 @@
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local resolve_path = shared.resolve_path
+-- Checklist grammar (line parse + box -> status) is owned by notes.shared.tasks.
+local tasks_shared = require("notes.shared.tasks")
 
 local function handler(args)
 	if not args.path or args.path == "" then
@@ -40,18 +42,15 @@ local function handler(args)
 		if heading then
 			current_heading = vim.trim(heading)
 		else
-			local box = line:match("^%s*[-*]%s*%[(.)%]")
-			if box then
+			local parsed = tasks_shared.parse_task_line(line)
+			if parsed then
+				-- Bucket every checklist line, classifiable or not, so a section
+				-- holding only unrecognized boxes still appears with total 0.
 				local b = bucket(current_heading)
-				if box == " " then
-					b.todo = b.todo + 1
-					totals.todo = totals.todo + 1
-				elseif box == "/" or box == "~" then
-					b.doing = b.doing + 1
-					totals.doing = totals.doing + 1
-				elseif box == "x" or box == "X" then
-					b.done = b.done + 1
-					totals.done = totals.done + 1
+				local status = tasks_shared.box_status(parsed.box)
+				if status then
+					b[status] = b[status] + 1
+					totals[status] = totals[status] + 1
 				end
 			end
 		end

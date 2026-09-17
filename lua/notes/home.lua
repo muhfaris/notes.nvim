@@ -318,6 +318,19 @@ end
 
 -- ── Open / toggle ─────────────────────────────────────────────────────
 
+-- Close Notes Home. Closing the last window raises E444, so when Home is the
+-- only window we clear its `bufhidden` and swap in a clean empty buffer
+-- instead: the window survives and the dashboard buffer is wiped.
+function M.close(buf)
+	buf = buf or vim.api.nvim_get_current_buf()
+	if vim.fn.winnr("$") == 1 then
+		vim.api.nvim_set_option_value("bufhidden", "", { buf = buf })
+		vim.cmd("enew")
+	else
+		vim.api.nvim_win_close(vim.api.nvim_get_current_win(), true)
+	end
+end
+
 function M.open()
 	-- Toggle off if already shown (search existing windows like the explorer does).
 	for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -377,14 +390,7 @@ function M.open()
 
 	-- Close key removes the Home window.
 	vim.keymap.set("n", "q", function()
-		local w = vim.api.nvim_get_current_win()
-		if vim.fn.winnr("$") == 1 then
-			-- Last window: replace Home with a clean empty buffer instead of closing.
-			vim.api.nvim_set_option_value("bufhidden", "", { buf = home_buf })
-			vim.cmd("enew")
-		else
-			vim.api.nvim_win_close(w, true)
-		end
+		M.close(home_buf)
 	end, opts)
 
 	-- Action keys run a command from within Home.
@@ -415,27 +421,31 @@ function M.open()
 		return nil
 	end
 
-	-- box -> notes.shared.tasks status name, for detail-note sync below.
-	local BOX_STATUS = { [" "] = "todo", ["/"] = "doing", ["x"] = "done" }
+	-- Checklist grammar (box <-> status, the box rewriter, the detail-note sync)
+	-- is owned by notes.shared.tasks, so these keys and the notes_toggle_task MCP
+	-- tool cannot drift on which glyph means what.
+	local tasks_shared = require("notes.shared.tasks")
 
 	-- Best-effort: mirrors notes_toggle_task's detail-note sync so a status
 	-- change reads the same whether it came from these keys or from an AI
 	-- agent using the MCP tool.
-	local function sync_detail_status(path, fixed_line, box)
-		local status = BOX_STATUS[box]
-		if not status then
-			return
-		end
+	local function sync_detail_status(path, fixed_line, status)
 		local config = require("notes.config").get_config()
 		local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
-		require("notes.shared.tasks").sync_detail_status(path, fixed_line, notes_dir, status)
+		tasks_shared.sync_detail_status(path, fixed_line, notes_dir, status)
 	end
 
 	-- Rewrite the checkbox box on the target note line: if the markdown buffer is
 	-- already open we edit it in place and save it (so unsaved edits aren't lost),
-	-- otherwise we read/modify/write the file on disk. `box` is the raw marker
-	-- text without brackets e.g. "/", "x", or a single space (for `[ ]`).
-	local function persist_card(box)
+	-- otherwise we read/modify/write the file on disk. `status` is the target
+	-- state name ("todo"/"doing"/"done"); the glyph it writes comes from
+	-- notes.shared.tasks.status_box, so `x` cannot mean one thing here and
+	-- another in the MCP tool.
+	local function persist_card(status)
+		local box = tasks_shared.status_box(status)
+		if not box then
+			return false
+		end
 		local e = hovered_card()
 		if not e then
 			return false
@@ -447,13 +457,13 @@ function M.open()
 			if not line then
 				return false
 			end
-			local fixed = line:gsub("(%s*[-*]%s*%[)([^)%]])(%])", "%1" .. box .. "%3", 1)
+			local fixed = tasks_shared.set_box(line, box)
 			if fixed ~= line then
 				vim.api.nvim_buf_set_lines(buf, lnum - 1, lnum, false, { fixed })
 				vim.api.nvim_buf_call(buf, function()
 					vim.cmd("silent write")
 				end)
-				sync_detail_status(path, fixed, box)
+				sync_detail_status(path, fixed, status)
 				M.render(home_buf)
 			end
 			return true
@@ -472,7 +482,7 @@ function M.open()
 		for _, l in ipairs(vim.split(content, "\n")) do
 			n = n + 1
 			if n == lnum then
-				local fixed = l:gsub("(%s*[-*]%s*%[)([^]])(%])", "%1" .. box .. "%3", 1)
+				local fixed = tasks_shared.set_box(l, box)
 				if fixed ~= l then
 					changed = true
 					fixed_line = fixed
@@ -488,29 +498,31 @@ function M.open()
 		if fw then
 			fw:write(table.concat(out, "\n"))
 			fw:close()
-			sync_detail_status(path, fixed_line, box)
+			sync_detail_status(path, fixed_line, status)
 			M.render(home_buf)
 			return true
 		end
 		return false
 	end
-	-- Movement keys act on the todo/doing lanes only.
+	-- Movement keys act on the todo/doing lanes only, and name the *target
+	-- status* rather than a glyph: p promotes todo, x finishes doing, b sends it
+	-- back to todo. The written box comes from the shared grammar.
 	vim.keymap.set("n", "p", function()
 		local e = hovered_card()
 		if e and e.status == "todo" then
-			persist_card("/")
+			persist_card("doing")
 		end
 	end, opts)
 	vim.keymap.set("n", "x", function()
 		local e = hovered_card()
 		if e and e.status == "doing" then
-			persist_card("x")
+			persist_card("done")
 		end
 	end, opts)
 	vim.keymap.set("n", "b", function()
 		local e = hovered_card()
 		if e and e.status == "doing" then
-			persist_card(" ")
+			persist_card("todo")
 		end
 	end, opts)
 

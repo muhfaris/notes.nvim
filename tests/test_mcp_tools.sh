@@ -175,6 +175,35 @@ check "notes_backlinks: quoted title round-trips out of frontmatter unescaped" "
 
 # ── notes_add_subtask + notes_toggle_task (with detail-note sync) ───────
 
+# ── alias (`[[ parent/child|label ]]`) is a supported alternative ───────
+# An author-written alias is not a legacy format: the line must still resolve to
+# its detail note *and* keep the label the author chose, instead of having it
+# overwritten by the resolved detail note's own title.
+
+write_board
+out=$(call '{"name":"notes_add_subtask","arguments":{"path":"board.md","parent_match":"Category B","title":"aliased child"}}')
+alias_target=$(echo "$out" | jq -r '.detail_note')
+printf -- '- [ ] [[ Category B/aliased child|Short label ]]\n' >>"$notes_dir/board.md"
+
+out=$(call '{"name":"notes_tasks","arguments":{"status":"todo"}}')
+check "notes_tasks: an aliased line resolves to its detail note" "$(echo "$out" | jq -e --arg d "$alias_target" '[.tasks[] | select(.text == "Short label")][0].detail == $d' >/dev/null && echo true || echo false)"
+check "notes_tasks: an aliased line keeps its own label, not the resolved title" "$(echo "$out" | jq -e '[.tasks[] | select(.text == "aliased child")] | length == 1' >/dev/null && echo true || echo false)"
+
+# ── '*' bullets are checkbox lines too ───────────────────────────────
+# The detail link used to be resolved behind a literal `- [` test -- false for
+# `* [ ]` lines, even though the scanner itself accepts `[-*]` bullets.
+
+write_board
+out=$(call '{"name":"notes_add_subtask","arguments":{"path":"board.md","parent_match":"Category B","title":"star child"}}')
+star_target=$(echo "$out" | jq -r '.detail_note')
+printf -- '* [ ] [[ Category B/star child ]]\n' >>"$notes_dir/board.md"
+
+out=$(call '{"name":"notes_tasks","arguments":{"status":"todo"}}')
+# Two lines point at that detail note: the nested `- [ ]` line notes_add_subtask
+# generated, and the hand-written `* [ ]` one. Before the fix the `*` line
+# silently resolved nothing, so the count was 1.
+check "notes_tasks: a '*' bullet resolves the same detail link as its '-' sibling" "$(echo "$out" | jq -e --arg d "$star_target" '[.tasks[] | select(.detail == $d)] | length == 2' >/dev/null && echo true || echo false)"
+
 write_board
 out=$(call '{"name":"notes_add_subtask","arguments":{"path":"board.md","parent_match":"Category B","title":"new subtask"}}')
 check "notes_add_subtask: reports success" "$(echo "$out" | jq -e '.success == true' >/dev/null && echo true || echo false)"
