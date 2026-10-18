@@ -41,8 +41,8 @@ status_of() {
 }
 
 if [ ! -d "$plans_dir" ]; then
-	printf 'FAIL - no %s\n' "$plans_dir"
-	exit 1
+	printf 'SKIP - %s is local-only and absent\n' "$plans_dir"
+	exit 0
 fi
 
 for dir in "$plans_dir"/*/*/; do

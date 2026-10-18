@@ -1,0 +1,13 @@
+# Local agent/tool state
+.codecompanion/
+.codegraph/
+.commandcode/
+memories/
+
+# Local development scratch
+scratch/
+plans/
+lua/notes/home_prototype.lua
+
+# Logs
+*.log
