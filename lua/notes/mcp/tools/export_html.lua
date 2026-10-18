@@ -385,7 +385,7 @@ end
 
 return {
 	name = "notes_export_html",
-	description = "Render one note to a standalone HTML file with inline CSS, returning an absolute path and a `file://` URL. Uses pandoc when installed (full Markdown, tables, task lists) and a built-in fallback otherwise. Markdown links/images are sanitized, wiki-links render as styled labels, and local images resolve to absolute file URLs. Set `open=true` to launch the system browser; `output` overrides the default path under `notes_dir/.exports/`.",
+	description = "Render one note to a standalone HTML file with inline CSS, returning an absolute path and a `file://` URL. Pandoc is optional: when installed it renders full Markdown (tables, task lists); otherwise a built-in renderer handles headings, lists/checkboxes, code, quotes, links, images, and wiki-links. Markdown links/images are sanitized, wiki-links render as styled labels, and local images resolve to absolute file URLs. `open=true` launches the system browser via `xdg-open`/`open`/`cmd`; if no opener exists the path and URL are still returned. `output` overrides the default path under `notes_dir/.exports/`.",
 	inputSchema = {
 		type = "object",
 		properties = {
@@ -394,7 +394,10 @@ return {
 				type = "string",
 				description = "Optional output HTML path; relative paths resolve against notes_dir. Defaults to notes_dir/.exports/<note>.html",
 			},
-			open = { type = "boolean", description = "Open the generated file in the system browser" },
+			open = {
+				type = "boolean",
+				description = "Open the generated file with the system opener (xdg-open/open/cmd); if unavailable, path and url are still returned",
+			},
 		},
 		required = { "path" },
 	},
