@@ -7,7 +7,6 @@
 
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
-local resolve_path = shared.resolve_path
 local relative_path = shared.relative_path
 
 local function handler(args)
@@ -17,7 +16,10 @@ local function handler(args)
 
 	local rel_path = nil
 	if args.path and args.path ~= "" then
-		local abs_path = resolve_path(args.path)
+		local abs_path, lookup_error = shared.resolve_note_or_error(args.path)
+		if not abs_path then
+			return encode_checked(encode_json(lookup_error))
+		end
 		rel_path = relative_path(abs_path)
 		if not rel_path then
 			return encode_checked(encode_json({ error = "path is outside the notes directory: " .. args.path }))

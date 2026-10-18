@@ -11,7 +11,6 @@
 
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
-local resolve_path = shared.resolve_path
 -- Checklist grammar is owned by notes.shared.tasks.
 local tasks_shared = require("notes.shared.tasks")
 
@@ -24,20 +23,19 @@ local function handler(args)
 		return encode_checked(encode_json({ error = "title is required" }))
 	end
 
-	local abs_from = resolve_path(args.from_path)
-	if vim.fn.filereadable(abs_from) ~= 1 then
-		return encode_checked(encode_json({ error = "note not found: " .. args.from_path }))
+	local abs_from, lookup_error = shared.resolve_note_or_error(args.from_path)
+	if not abs_from then
+		return encode_checked(encode_json(lookup_error))
 	end
 
-	local f = io.open(abs_from, "r")
-	if not f then
+	local content = shared.read_content(abs_from)
+	if not content then
 		return encode_checked(encode_json({ error = "failed to read note: " .. abs_from }))
 	end
 	local lines = {}
-	for line in f:lines() do
+	for line in (content .. "\n"):gmatch("(.-)\n") do
 		table.insert(lines, line)
 	end
-	f:close()
 
 	-- Pass 1: mark every checklist line that is not done, plus its chain of
 	-- task-line ancestors (by indentation), as "keep".

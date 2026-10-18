@@ -19,27 +19,41 @@ M.order = { task = 1, todo = 2, ask = 3, ["#todo"] = 4, ["#tech-debt"] = 5 }
 -- The one place a checklist line is spelled out. A new box glyph or bullet
 -- style is added here, not in nine hand-rolled patterns.
 
--- Box glyph this plugin *writes* for each status (Home's p/x/b keys,
+-- Box glyph this plugin *writes* for each status (Home's p/x/b/w keys,
 -- notes_toggle_task), and the boxes it *recognizes* when reading. `~` is
--- accepted as an alias of `/` for in-progress work; `X` as done.
-M.boxes = { todo = " ", doing = "/", done = "x" }
+-- accepted as an alias of `/` for in-progress work; `X` as done. `?` is the
+-- state this vault was missing: asked, waiting on a reply from somebody else.
+M.boxes = { todo = " ", doing = "/", done = "x", waiting = "?" }
 local DOING_BOXES = { ["/"] = true, ["~"] = true }
 local DONE_BOXES = { ["x"] = true, ["X"] = true }
+local WAITING_BOXES = { ["?"] = true }
 
 -- Every box character that names one of our states. Deliberately narrower
 -- than "any character between brackets": this is the set an action may fire
--- on, so an unclassifiable `- [!]` line does not qualify.
-M.KNOWN_BOXES = { [" "] = true, x = true, X = true, ["/"] = true, ["~"] = true, ["-"] = true }
+-- on, so an unclassifiable `- [!]` line does not qualify. `- [-]` is known but
+-- carries no status, so it is never open.
+M.KNOWN_BOXES = {
+	[" "] = true,
+	x = true,
+	X = true,
+	["/"] = true,
+	["~"] = true,
+	["-"] = true,
+	["?"] = true,
+}
 
 --- Status a box character stands for, or nil when the box is unrecognized.
 --- @param box string Single character captured from between the brackets.
---- @return string|nil "todo" | "doing" | "done"
+--- @return string|nil "todo" | "doing" | "waiting" | "done"
 M.box_status = function(box)
 	if box == " " then
 		return "todo"
 	end
 	if DOING_BOXES[box] then
 		return "doing"
+	end
+	if WAITING_BOXES[box] then
+		return "waiting"
 	end
 	if DONE_BOXES[box] then
 		return "done"
@@ -49,20 +63,21 @@ end
 
 --- Box character a writer should emit for a status name — the inverse of
 --- M.box_status, and the only place the written glyphs are chosen.
---- @param status string "todo" | "doing" | "done"
+--- @param status string "todo" | "doing" | "waiting" | "done"
 --- @return string|nil
 M.status_box = function(status)
 	return M.boxes[status]
 end
 
---- True for the boxes that name an *open* task: not-started or in-progress.
---- The whitelist is the point — an unrecognized box counts as closed, so
---- neither the scanner nor a rollover resurrects a line it cannot classify.
+--- True for the boxes that name an *open* task: not-started, in-progress, or
+--- blocked on somebody else. The whitelist is the point — an unrecognized box
+--- counts as closed, so neither the scanner nor a rollover resurrects a line it
+--- cannot classify.
 --- @param box string
 --- @return boolean
 M.is_open_box = function(box)
 	local status = M.box_status(box)
-	return status == "todo" or status == "doing"
+	return status == "todo" or status == "doing" or status == "waiting"
 end
 
 --- Split a checklist line into its parts, or nil when the line is not one
@@ -81,7 +96,8 @@ end
 
 --- True when a line is a checklist item carrying one of our known boxes.
 --- Stricter than M.parse_task_line on purpose: this is the guard deciding
---- "may an action fire on this line", where `- [!]` or `- [?]` should not pass.
+--- "may an action fire on this line", where `- [!]` should not pass. `- [?]` is
+--- known since `?` names the waiting state.
 --- @param line string
 --- @return boolean
 M.is_task_line = function(line)
@@ -397,7 +413,7 @@ end
 --- @param note_path string Absolute path of the note containing the line.
 --- @param line string The task line (after its checkbox was changed).
 --- @param notes_dir string Absolute notes root.
---- @param status string New status value to write ("todo"|"doing"|"done").
+--- @param status string New status value to write ("todo"|"doing"|"waiting"|"done").
 --- @return string|nil detail_path, boolean synced
 M.sync_detail_status = function(note_path, line, notes_dir, status)
 	local detail_path = M.detail_path_from_line(note_path, line, notes_dir)

@@ -43,7 +43,7 @@ end
 
 return {
 	name = "notes_tasks",
-	description = "Scan all notes for open tasks: checklist items (`- [ ]` todo, `- [/]`/`- [~]` doing; done items are excluded), inline TODO/ASK markers, and #todo/#tech-debt tags. Mirrors the Notes Home kanban board. Use the returned `lnum` with notes_toggle_task to change a checklist item's status. A checklist item's `detail` is its linked detail note's path, if any; if the line carries a `[[...]]` link that could not be resolved to a file, `unresolved_link` holds the raw link body instead so a broken link isn't mistaken for 'no link at all'.",
+	description = "Scan all notes for open tasks: checklist items (`- [ ]` todo, `- [/]`/`- [~]` doing, `- [?]` waiting on somebody else; done items are excluded), inline TODO/ASK markers, and #todo/#tech-debt tags. Mirrors the Notes Home kanban board. Use the returned `lnum` with notes_toggle_task to change a checklist item's status. A checklist item's `detail` is its linked detail note's path, if any; if the line carries a `[[...]]` link that could not be resolved to a file, `unresolved_link` holds the raw link body instead so a broken link isn't mistaken for 'no link at all'.",
 	inputSchema = {
 		type = "object",
 		properties = {
@@ -51,10 +51,10 @@ return {
 				type = "string",
 				description = "Optional filter: 'task' (checklist item), 'todo', 'ask', '#todo', or '#tech-debt'",
 			},
-			status = {
-				type = "string",
-				description = "Optional filter for checklist tasks only: 'todo' or 'doing'",
-			},
+				status = {
+					type = "string",
+					description = "Optional filter for checklist tasks only: 'todo', 'doing', or 'waiting'",
+				},
 			limit = { type = "number", description = "Optional max results (0 or omitted = unlimited)" },
 		},
 		required = {},

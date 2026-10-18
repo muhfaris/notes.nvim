@@ -4,7 +4,6 @@
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
 local notes_dir = shared.notes_dir
-local resolve_path = shared.resolve_path
 local parse_note = shared.parse_note
 local scan_notes = shared.scan_notes
 
@@ -89,10 +88,11 @@ local function handler(args)
 		return encode_checked(encode_json({ error = "path is required" }))
 	end
 
-	local target_path = vim.fn.resolve(resolve_path(path))
-	if vim.fn.filereadable(target_path) ~= 1 then
-		return encode_checked(encode_json({ error = "note not found: " .. path }))
+	local resolved, lookup_error = shared.resolve_note_or_error(path)
+	if not resolved then
+		return encode_checked(encode_json(lookup_error))
 	end
+	local target_path = vim.fn.resolve(resolved)
 
 	local notes_abs = vim.fn.resolve(notes_dir)
 	if target_path:sub(1, #notes_abs) ~= notes_abs then

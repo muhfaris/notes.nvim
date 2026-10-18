@@ -29,10 +29,10 @@ check(tasks.parse_task_line("plain text") == nil, "parse_task_line is nil off a 
 check(tasks.parse_task_line("") == nil, "parse_task_line is nil on an empty line")
 
 -- is_task_line: the strict gate. Known boxes pass, unclassifiable ones do not.
-for _, line in ipairs({ "- [ ] a", "* [/] b", "  - [x] c", "- [~] d", "  * [X] e", "- [-] f" }) do
+for _, line in ipairs({ "- [ ] a", "* [/] b", "  - [x] c", "- [~] d", "  * [X] e", "- [-] f", "- [?] g" }) do
 	check(tasks.is_task_line(line), "is_task_line accepts: " .. line)
 end
-for _, line in ipairs({ "- [!] e", "- [?] e", "# [ ] e", "- [] e", "plain text", "" }) do
+for _, line in ipairs({ "- [!] e", "# [ ] e", "- [] e", "plain text", "" }) do
 	check(not tasks.is_task_line(line), "is_task_line rejects: " .. line)
 end
 
@@ -42,16 +42,29 @@ check(tasks.box_status("/") == "doing", "box '/' reads as doing")
 check(tasks.box_status("~") == "doing", "box '~' reads as doing")
 check(tasks.box_status("x") == "done", "box 'x' reads as done")
 check(tasks.box_status("X") == "done", "box 'X' reads as done")
+check(tasks.box_status("?") == "waiting", "box '?' reads as waiting")
 check(tasks.box_status("!") == nil, "an unrecognized box has no status")
 check(tasks.box_status(nil) == nil, "a nil box has no status")
-check(tasks.status_box("todo") == " " and tasks.status_box("doing") == "/" and tasks.status_box("done") == "x",
-	"status_box is the inverse of box_status")
+check(tasks.box_status("-") == nil, "'- [-]' is known to the gate but names no status")
+check(
+	tasks.status_box("todo") == " "
+		and tasks.status_box("doing") == "/"
+		and tasks.status_box("waiting") == "?"
+		and tasks.status_box("done") == "x",
+	"status_box is the inverse of box_status"
+)
 check(tasks.status_box("nope") == nil, "status_box is nil for an unknown status")
 
 -- is_open_box: the open-task whitelist shared by the scanner and rollover.
-check(tasks.is_open_box(" ") and tasks.is_open_box("/") and tasks.is_open_box("~"), "todo/doing boxes are open")
+check(
+	tasks.is_open_box(" ") and tasks.is_open_box("/") and tasks.is_open_box("~") and tasks.is_open_box("?"),
+	"todo/doing/waiting boxes are open"
+)
 check(not tasks.is_open_box("x") and not tasks.is_open_box("X"), "done boxes are not open")
-check(not tasks.is_open_box("!") and not tasks.is_open_box(nil), "an unrecognized box is not open")
+check(
+	not tasks.is_open_box("!") and not tasks.is_open_box("-") and not tasks.is_open_box(nil),
+	"an unrecognized or statusless box is not open"
+)
 
 -- set_box: rewrites the box and nothing else.
 check(tasks.set_box("- [ ] a", "/") == "- [/] a", "set_box promotes todo to doing")
@@ -98,6 +111,7 @@ write("Board.md", table.concat({
 	"- [x] done, not a card",
 	"- [X] done too",
 	"- [!] unclassifiable, not a card",
+	"- [?] sent it, waiting on a reply",
 	"- [ ] [[Board/Linked child]]",
 	"",
 }, "\n"))
@@ -114,6 +128,10 @@ check(found["nested doing"] ~= nil and found["nested doing"].status == "doing", 
 check(found["done, not a card"] == nil, "scan: '[x]' never becomes a card")
 check(found["done too"] == nil, "scan: '[X]' never becomes a card")
 check(found["unclassifiable, not a card"] == nil, "scan: an unrecognized box never becomes a card")
+check(
+	found["sent it, waiting on a reply"] ~= nil and found["sent it, waiting on a reply"].status == "waiting",
+	"scan: '[?]' becomes a waiting card"
+)
 check(found["Linked child"] ~= nil and found["Linked child"].detail ~= nil, "scan: a link-only line resolves its detail note")
 
 -- ── The editor toggle, through the same grammar ───────────────────────────
@@ -128,6 +146,10 @@ check(toggle("- [ ] toggle me") == "- [x] toggle me", "toggle: todo -> done")
 check(toggle("- [x] toggle me") == "- [ ] toggle me", "toggle: done -> todo")
 check(toggle("- [X] toggle me") == "- [ ] toggle me", "toggle: '[X]' is done, so it toggles")
 check(toggle("- [/] in progress") == "- [/] in progress", "toggle: an in-progress line is left alone")
+check(
+	toggle("- [?] waiting on a reply") == "- [?] waiting on a reply",
+	"toggle: a waiting line is left alone (only todo <-> done)"
+)
 check(toggle("plain text") == "plain text", "toggle: a non-task line is left alone")
 
 print(string.format("\n%d / %d checks passed", checks - failures, checks))

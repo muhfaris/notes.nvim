@@ -105,8 +105,8 @@ rm -f "$notes_dir/markers.md"
 # ── notes_board_status ───────────────────────────────────────────────────
 
 out=$(call '{"name":"notes_board_status","arguments":{"path":"board.md"}}')
-check "notes_board_status: totals across the note" "$(echo "$out" | jq -e '.totals == {"todo":2,"doing":0,"done":3}' >/dev/null && echo true || echo false)"
-check "notes_board_status: Tuesday section breakdown" "$(echo "$out" | jq -e '[.sections[] | select(.heading=="Tuesday")][0] == {"heading":"Tuesday","todo":2,"doing":0,"done":1,"total":3}' >/dev/null && echo true || echo false)"
+check "notes_board_status: totals across the note" "$(echo "$out" | jq -e '.totals == {"todo":2,"doing":0,"waiting":0,"done":3}' >/dev/null && echo true || echo false)"
+check "notes_board_status: Tuesday section breakdown" "$(echo "$out" | jq -e '[.sections[] | select(.heading=="Tuesday")][0] == {"heading":"Tuesday","todo":2,"doing":0,"waiting":0,"done":1,"total":3}' >/dev/null && echo true || echo false)"
 
 # ── notes_backlinks: subtask parent/child convention ────────────────────
 
@@ -220,6 +220,25 @@ check "notes_toggle_task: flips the checkbox to doing" "$(echo "$out" | jq -e '.
 check "notes_toggle_task: syncs the linked detail note's status" "$(echo "$out" | jq -e '.detail_synced == true' >/dev/null && echo true || echo false)"
 check "notes_toggle_task: detail note frontmatter now has status: doing" "$(grep -q 'status: "doing"' "$detail_note" && echo true || echo false)"
 
+out=$(call '{"name":"notes_toggle_task","arguments":{"path":"board.md","match":"new subtask","status":"waiting"}}')
+check "notes_toggle_task: flips the checkbox to waiting" "$(echo "$out" | jq -e '.line == "  - [?] [[ Category B/new subtask ]]"' >/dev/null && echo true || echo false)"
+check "notes_toggle_task: stamps the detail note's status as waiting" "$(grep -q 'status: \"waiting\"' "$detail_note" && echo true || echo false)"
+
+# The same line, read back through the scanner: a waiting task is still open.
+out=$(call '{"name":"notes_tasks","arguments":{"type":"task","status":"waiting"}}')
+check "notes_tasks: a waiting task is listed under status=waiting" "$(echo "$out" | jq -e '[.tasks[] | select(.text == "new subtask")] | length == 1' >/dev/null && echo true || echo false)"
+check "notes_tasks: waiting is not a done task" "$(echo "$out" | jq -e '[.tasks[] | select(.status == "done")] | length == 0' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_toggle_task","arguments":{"path":"board.md","match":"new subtask","status":"doing"}}')
+check "notes_toggle_task: waiting -> doing" "$(echo "$out" | jq -e '.line == "  - [/] [[ Category B/new subtask ]]"' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_toggle_task","arguments":{"path":"board.md","match":"new subtask","status":"nope"}}')
+check "notes_toggle_task: an unknown status is refused, and 'waiting' is named" "$(echo "$out" | jq -e '.error | test("waiting")' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_board_status","arguments":{"path":"board.md"}}')
+check "notes_board_status: totals carry the waiting bucket" "$(echo "$out" | jq -e '.totals | has("waiting")' >/dev/null && echo true || echo false)"
+check "notes_board_status: a section row carries the waiting bucket" "$(echo "$out" | jq -e '.sections[0] | has("waiting")' >/dev/null && echo true || echo false)"
+
 out=$(call '{"name":"notes_toggle_task","arguments":{"path":"board.md","match":"child","status":"done"}}')
 check "notes_toggle_task: ambiguous match is rejected with candidates" "$(echo "$out" | jq -e '.error and (.candidates | length) > 1' >/dev/null && echo true || echo false)"
 
@@ -286,6 +305,377 @@ out=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"na
 check "notes_search_content: Lua fallback finds a query containing pattern-magic characters" "$(echo "$out" | jq -e 'length == 1 and .[0].relative_path == "needle.md"' >/dev/null && echo true || echo false)"
 
 rm -f "$notes_dir/needle.md"
+
+# ── Path resolution by filename/title + suggestions ────────────────────────
+
+mkdir -p "$notes_dir/documents/project-alpha/Y-m/weekly"
+cat >"$notes_dir/documents/project-alpha/Y-m/weekly/w2-oct-2026.md" <<'EOF'
+---
+title: "Weekly: w2 oct 2026"
+date: "2026-10-12"
+tags: ["weekly"]
+summary: ""
+---
+# Weekly: w2 oct 2026
+
+- [ ] nested task
+EOF
+
+out=$(call '{"name":"notes_read","arguments":{"path":"w2-oct-2026.md"}}')
+check "notes_read: a bare filename resolves anywhere in the vault" \
+	"$(echo "$out" | jq -e '.relative_path == "documents/project-alpha/Y-m/weekly/w2-oct-2026.md" and .title == "Weekly: w2 oct 2026"' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_read","arguments":{"path":"Weekly: w2 oct 2026"}}')
+check "notes_read: a title resolves to its note" \
+	"$(echo "$out" | jq -e '.relative_path == "documents/project-alpha/Y-m/weekly/w2-oct-2026.md"' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_read","arguments":{"path":"w2-oct-2027.md"}}')
+check "notes_read: a miss returns similar paths" \
+	"$(echo "$out" | jq -e '.error != null and ([.suggestions[].relative_path] | index("documents/project-alpha/Y-m/weekly/w2-oct-2026.md")) != null' >/dev/null && echo true || echo false)"
+
+# ── notes_resolve_link ────────────────────────────────────────────────────
+
+mkdir -p "$notes_dir/tasks/2026/10"
+cat >"$notes_dir/tasks/2026/10/2026-10-05-tag-status.md" <<'EOF'
+---
+title: "Tag status w2"
+date: "2026-10-05"
+tags: ["task"]
+summary: ""
+parent: "[[ Example Workstream ]]"
+source_note: "documents/project-alpha/Y-m/weekly/w2-oct-2026.md"
+---
+# Tag status w2
+
+- [ ] check the tag status
+EOF
+
+out=$(call '{"name":"notes_resolve_link","arguments":{"link":"[[ Example Workstream/Tag status w2 ]]"}}')
+check "notes_resolve_link: resolves a Parent/Child link to the detail note" \
+	"$(echo "$out" | jq -e '.relative_path == "tasks/2026/10/2026-10-05-tag-status.md" and .match != null' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_resolve_link","arguments":{"link":"[[ Example Workstream/No Such Task ]]"}}')
+check "notes_resolve_link: an unresolved link returns suggestions" \
+	"$(echo "$out" | jq -e '.error != null and (.suggestions | length) > 0' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_get_metadata","arguments":{"path":"2026-10-05-tag-status.md"}}')
+check "notes_get_metadata: custom parent/source_note fields are returned" \
+	"$(echo "$out" | jq -e '.parent == "[[ Example Workstream ]]" and .source_note == "documents/project-alpha/Y-m/weekly/w2-oct-2026.md"' >/dev/null && echo true || echo false)"
+
+# ── notes_add_task: insert under a day and a parent ───────────────────────
+
+write_board
+out=$(call '{"name":"notes_add_task","arguments":{"path":"board.md","heading":"Tuesday","text":"new inline task","status":"doing"}}')
+new_lnum=$(echo "$out" | jq -r '.lnum')
+check "notes_add_task: inserts under the day heading with the requested status" \
+	"$(echo "$out" | jq -e '.line == "- [/] new inline task"' >/dev/null && sed -n "${new_lnum}p" "$notes_dir/board.md" | grep -qxF -- '- [/] new inline task' && echo true || echo false)"
+
+out=$(call '{"name":"notes_add_task","arguments":{"path":"board.md","heading":"Tuesday","parent":"Category B","link":"Category B/linked task"}}')
+check "notes_add_task: nests a linked task under a parent" \
+	"$(echo "$out" | jq -e '.line == "  - [ ] [[ Category B/linked task ]]"' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_toggle_task","arguments":{"path":"board.md","link":"[[ Category B/linked task ]]","mark":"x"}}')
+check "notes_toggle_task: link + raw mark work as set_status(link, mark)" \
+	"$(echo "$out" | jq -e '.line == "  - [x] [[ Category B/linked task ]]" and .status == "done"' >/dev/null && echo true || echo false)"
+
+# ── notes_copy_task_to_today ──────────────────────────────────────────────
+
+copy_date="2026-10-18"
+out=$(call "{\"name\":\"notes_copy_task_to_today\",\"arguments\":{\"from_path\":\"board.md\",\"link\":\"Category B/linked task\",\"date\":\"$copy_date\"}}")
+copy_target=$(echo "$out" | jq -r '.target_path // empty')
+check "notes_copy_task_to_today: creates today's daily note" \
+	"$(echo "$out" | jq -e '.target_created == true' >/dev/null && [ -f "$copy_target" ] && echo true || echo false)"
+check "notes_copy_task_to_today: resets the copied box to todo, keeps the link, and keeps the parent group" \
+	"$(echo "$out" | jq -e '.line == "  - [ ] [[ Category B/linked task ]]" and .parent == "Category B" and .parent_created == true' >/dev/null && grep -qF -- '  - [ ] [[ Category B/linked task ]]' "$copy_target" && grep -qxF -- '- [ ] Category B' "$copy_target" && echo true || echo false)"
+
+out=$(call "{\"name\":\"notes_copy_task_to_today\",\"arguments\":{\"from_path\":\"board.md\",\"link\":\"Category B/linked task\",\"date\":\"$copy_date\"}}")
+check "notes_copy_task_to_today: a second copy is deduplicated" \
+	"$(echo "$out" | jq -e '.copied == false and .duplicate == true' >/dev/null && echo true || echo false)"
+
+# ── notes_append_info ─────────────────────────────────────────────────────
+
+cat >"$notes_dir/tasks/2026/10/2026-10-18-info-target.md" <<'EOF'
+---
+title: "Info Target"
+date: "2026-10-18"
+tags: ["task"]
+summary: ""
+---
+# Info Target
+
+## Summary
+
+Some context.
+
+- [ ] checklist one
+EOF
+
+out=$(call '{"name":"notes_append_info","arguments":{"path":"info-target","text":"shipped the fix","label":"Monday"}}')
+info_lnum=$(echo "$out" | jq -r '.lnum')
+check "notes_append_info: inserts the Info line directly above the checklist" \
+	"$(echo "$out" | jq -e '.lines[0] == "- Info (Monday): shipped the fix"' >/dev/null && sed -n "${info_lnum}p" "$notes_dir/tasks/2026/10/2026-10-18-info-target.md" | grep -qx -- '- Info (Monday): shipped the fix' && echo true || echo false)"
+check "notes_append_info: the checklist remains immediately after it" \
+	"$(sed -n "$((info_lnum + 1))p" "$notes_dir/tasks/2026/10/2026-10-18-info-target.md" | grep -qxF -- '- [ ] checklist one' && echo true || echo false)"
+
+# position='summary' must stay inside Summary, above its checklist, instead of
+# drifting to the section end and touching the next heading.
+cat >"$notes_dir/summary-position.md" <<'EOF'
+---
+title: "Summary Position"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Summary Position
+
+## Summary
+
+Some context.
+
+- [ ] checklist one
+- [x] Konfirmasi ke QA ...
+
+## Evidence
+
+evidence text
+EOF
+
+out=$(call '{"name":"notes_append_info","arguments":{"path":"summary-position.md","text":"summary stays above the checklist","label":"Sun","position":"summary"}}')
+summary_lnum=$(echo "$out" | jq -r '.lnum')
+checklist_lnum=$(grep -nxF -- '- [ ] checklist one' "$notes_dir/summary-position.md" | cut -d: -f1)
+evidence_lnum=$(grep -nxF -- '## Evidence' "$notes_dir/summary-position.md" | cut -d: -f1)
+check "notes_append_info position=summary: lands above the Summary checklist" \
+	"$([ "$summary_lnum" -lt "$checklist_lnum" ] && echo true || echo false)"
+check "notes_append_info position=summary: does not drift below the checklist" \
+	"$([ "$summary_lnum" -lt "$evidence_lnum" ] && sed -n "$((evidence_lnum - 1))p" "$notes_dir/summary-position.md" | grep -q '^$' && echo true || echo false)"
+
+cat >"$notes_dir/summary-prose.md" <<'EOF'
+---
+title: "Summary Prose"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Summary Prose
+
+## Summary
+
+Some context.
+
+## Evidence
+
+evidence text
+EOF
+
+out=$(call '{"name":"notes_append_info","arguments":{"path":"summary-prose.md","text":"after the prose","label":"Sun","position":"summary"}}')
+prose_info_lnum=$(echo "$out" | jq -r '.lnum')
+prose_evidence_lnum=$(grep -nxF -- '## Evidence' "$notes_dir/summary-prose.md" | cut -d: -f1)
+check "notes_append_info position=summary: a prose-only section keeps a blank line before the next heading" \
+	"$(sed -n "$((prose_evidence_lnum - 1))p" "$notes_dir/summary-prose.md" | grep -q '^$' && [ "$prose_info_lnum" -lt "$prose_evidence_lnum" ] && echo true || echo false)"
+
+# ── expected_hash rejects concurrent edits ────────────────────────────────
+
+out=$(call '{"name":"notes_read","arguments":{"path":"board.md"}}')
+old_hash=$(echo "$out" | jq -r '.hash')
+printf '\n- [ ] concurrent edit\n' >>"$notes_dir/board.md"
+
+out=$(call "{\"name\":\"notes_update\",\"arguments\":{\"path\":\"board.md\",\"summary\":\"should not apply\",\"expected_hash\":\"$old_hash\"}}")
+check "notes_update: a stale expected_hash is refused" \
+	"$(echo "$out" | jq -e '.code == "stale_note" and .current_hash != .expected_hash' >/dev/null && echo true || echo false)"
+check "notes_update: the stale write did not touch the file" \
+	"$(! grep -q 'should not apply' "$notes_dir/board.md" && echo true || echo false)"
+
+# ── notes_create: task-detail convention + board insertion ────────────────
+
+cat >"$notes_dir/create_board.md" <<'EOF'
+---
+title: "Create Board"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Create Board
+
+### Wednesday
+- [ ] Category B
+EOF
+
+out=$(call '{"name":"notes_create","arguments":{"title":"Created Child","parent":"Category B","source_note":"documents/project-alpha/Y-m/weekly/w2-oct-2026.md","date":"2026-10-18","board_path":"create_board.md","heading":"Wednesday"}}')
+created_path=$(echo "$out" | jq -r '.path')
+check "notes_create: parent uses the tasks/YYYY/MM/date-slug path convention" \
+	"$(echo "$out" | jq -e '.relative_path == "tasks/2026/10/2026-10-18-created-child.md"' >/dev/null && [ -f "$created_path" ] && echo true || echo false)"
+check "notes_create: task frontmatter carries parent and source_note" \
+	"$(grep -q 'parent: "\[\[ Category B \]\]"' "$created_path" && grep -q 'source_note: "documents/project-alpha/Y-m/weekly/w2-oct-2026.md"' "$created_path" && echo true || echo false)"
+check "notes_create: board line is inserted under the parent" \
+	"$(echo "$out" | jq -e '.board_line == "  - [ ] [[ Category B/Created Child ]]"' >/dev/null && grep -qF -- '  - [ ] [[ Category B/Created Child ]]' "$notes_dir/create_board.md" && echo true || echo false)"
+
+# ── copy between day sections of the same board ───────────────────────────
+
+cat >"$notes_dir/copy_days.md" <<'EOF'
+---
+title: "Copy Days"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Copy Days
+
+## Saturday
+- [ ] Same task
+
+## Sunday
+- [ ] Other task
+EOF
+
+out=$(call '{"name":"notes_copy_task_to_today","arguments":{"from_path":"copy_days.md","heading":"Saturday","match":"Same task","target_path":"copy_days.md","target_heading":"Sunday"}}')
+check "notes_copy_task_to_today: copies between two headings of the same board" \
+	"$(echo "$out" | jq -e '.copied == true and .target_heading == "Sunday"' >/dev/null && [ "$(grep -cF -- '- [ ] Same task' "$notes_dir/copy_days.md")" = "2" ] && echo true || echo false)"
+sunday_lnum=$(grep -nxF -- '## Sunday' "$notes_dir/copy_days.md" | cut -d: -f1)
+copied_lnum=$(grep -nF -- '- [ ] Same task' "$notes_dir/copy_days.md" | tail -1 | cut -d: -f1)
+check "notes_copy_task_to_today: the copy lands under the destination heading" \
+	"$([ "$copied_lnum" -gt "$sunday_lnum" ] && echo true || echo false)"
+
+out=$(call '{"name":"notes_copy_task_to_today","arguments":{"from_path":"copy_days.md","heading":"Saturday","match":"Same task","target_path":"copy_days.md","target_heading":"Sunday"}}')
+check "notes_copy_task_to_today: duplicate detection is scoped to the destination heading" \
+	"$(echo "$out" | jq -e '.copied == false and .duplicate == true' >/dev/null && [ "$(grep -cF -- '- [ ] Same task' "$notes_dir/copy_days.md")" = "2" ] && echo true || echo false)"
+
+# ── notes_create: content is used verbatim ────────────────────────────────
+
+out=$(call '{"name":"notes_create","arguments":{"title":"Probe detail task","content":"# Probe detail task\n\nBody text."}}')
+probe_path=$(echo "$out" | jq -r '.path')
+check "notes_create: supplied content replaces the template skeleton" \
+	"$([ "$(grep -c '^# Probe detail task$' "$probe_path")" = "1" ] && ! grep -q '^## Description$' "$probe_path" && grep -q '^Body text\.$' "$probe_path" && echo true || echo false)"
+check "notes_create: default frontmatter date keeps the time component" \
+	"$(echo "$out" | jq -e '.date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$")' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_create","arguments":{"title":"Probe child","parent":"Bug Finding","content":"# Probe child\n\nBody text."}}')
+probe_child_path=$(echo "$out" | jq -r '.path')
+check "notes_create: task content is not wrapped in an extra H1/## Notes" \
+	"$([ "$(grep -c '^# Probe child$' "$probe_child_path")" = "1" ] && ! grep -q '^## Notes$' "$probe_child_path" && echo true || echo false)"
+
+# ── notes_create: exact parent task beats child-link substring ────────────
+
+cat >"$notes_dir/parent_board.md" <<'EOF'
+---
+title: "Parent Board"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Parent Board
+
+## Sunday
+- [ ] Bug Finding
+  - [ ] [[ Bug Finding/Investigate crash ]]
+EOF
+
+out=$(call '{"name":"notes_create","arguments":{"title":"Probe linked child","parent":"Bug Finding","board_path":"parent_board.md","heading":"Sunday"}}')
+check "notes_create: an exact parent label wins over child links containing it" \
+	"$(echo "$out" | jq -e '.board_error == null and .board_line == "  - [ ] [[ Bug Finding/Probe linked child ]]"' >/dev/null && echo true || echo false)"
+
+# ── notes_append_info: existing Info lines stay contiguous ────────────────
+
+cat >"$notes_dir/info-contiguous.md" <<'EOF'
+---
+title: "Info Contiguous"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Info Contiguous
+
+## Summary
+
+- Info (Sat): created by probe.
+
+- [ ] checklist one
+EOF
+
+out=$(call '{"name":"notes_append_info","arguments":{"path":"info-contiguous.md","text":"summary-mode probe","label":"Sun","position":"summary"}}')
+sat_lnum=$(grep -nxF -- '- Info (Sat): created by probe.' "$notes_dir/info-contiguous.md" | cut -d: -f1)
+sun_lnum=$(grep -nxF -- '- Info (Sun): summary-mode probe' "$notes_dir/info-contiguous.md" | cut -d: -f1)
+check "notes_append_info position=summary: consecutive Info lines are not split by a blank line" \
+	"$([ "$sun_lnum" = "$((sat_lnum + 1))" ] && echo true || echo false)"
+check "notes_append_info position=summary: the checklist separator remains below the Info block" \
+	"$(sed -n "$((sun_lnum + 1))p" "$notes_dir/info-contiguous.md" | grep -q '^$' && echo true || echo false)"
+
+# ── copy preserves the parent group and consumes an empty placeholder ─────
+
+cat >"$notes_dir/copy_parent.md" <<'EOF'
+---
+title: "Copy Parent"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Copy Parent
+
+## Saturday
+- [/] Bug Finding
+  - [/] [[ Bug Finding/Existing probe task ]]
+
+## Sunday
+- [ ]
+- [ ] Other task
+EOF
+
+out=$(call '{"name":"notes_copy_task_to_today","arguments":{"from_path":"copy_parent.md","link":"[[ Bug Finding/Existing probe task ]]","target_path":"copy_parent.md","target_heading":"Sunday"}}')
+check "notes_copy_task_to_today: recreates the missing parent group in the destination" \
+	"$(echo "$out" | jq -e '.copied == true and .parent == "Bug Finding" and .parent_created == true and .placeholder_replaced == true' >/dev/null && echo true || echo false)"
+check "notes_copy_task_to_today: the copied task is nested under the parent" \
+	"$(echo "$out" | jq -e '.line == "  - [ ] [[ Bug Finding/Existing probe task ]]"' >/dev/null && grep -qxF -- '  - [ ] [[ Bug Finding/Existing probe task ]]' "$notes_dir/copy_parent.md" && echo true || echo false)"
+check "notes_copy_task_to_today: the empty destination placeholder is consumed" \
+	"$(! grep -qxF -- '- [ ]' "$notes_dir/copy_parent.md" && echo true || echo false)"
+
+cat >"$notes_dir/copy_parent_reuse.md" <<'EOF'
+---
+title: "Copy Parent Reuse"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Copy Parent Reuse
+
+## Saturday
+- [/] Bug Finding
+  - [/] [[ Bug Finding/Second probe ]]
+
+## Sunday
+- [/] Bug Finding
+  - [ ] existing child
+- [ ]
+EOF
+
+out=$(call '{"name":"notes_copy_task_to_today","arguments":{"from_path":"copy_parent_reuse.md","link":"[[ Bug Finding/Second probe ]]","target_path":"copy_parent_reuse.md","target_heading":"Sunday"}}')
+check "notes_copy_task_to_today: reuses an existing destination parent instead of creating another" \
+	"$(echo "$out" | jq -e '.copied == true and .parent == "Bug Finding" and .parent_created == null' >/dev/null && [ "$(grep -cxF -- '- [/] Bug Finding' "$notes_dir/copy_parent_reuse.md")" = "2" ] && echo true || echo false)"
+check "notes_copy_task_to_today: the reused parent gains the copied child" \
+	"$(grep -qxF -- '  - [ ] [[ Bug Finding/Second probe ]]' "$notes_dir/copy_parent_reuse.md" && ! grep -qxF -- '- [ ]' "$notes_dir/copy_parent_reuse.md" && echo true || echo false)"
+
+cat >"$notes_dir/copy_placeholder.md" <<'EOF'
+---
+title: "Copy Placeholder"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Copy Placeholder
+
+## Saturday
+- [ ] Plain task
+
+## Sunday
+- [ ]
+- [ ] Other task
+EOF
+
+out=$(call '{"name":"notes_copy_task_to_today","arguments":{"from_path":"copy_placeholder.md","match":"Plain task","target_path":"copy_placeholder.md","target_heading":"Sunday"}}')
+check "notes_copy_task_to_today: an empty placeholder is replaced in place when there is no parent" \
+	"$(echo "$out" | jq -e '.copied == true and .placeholder_replaced == true and .parent == null' >/dev/null && [ "$(grep -cxF -- '- [ ] Plain task' "$notes_dir/copy_placeholder.md")" = "2" ] && ! grep -qxF -- '- [ ]' "$notes_dir/copy_placeholder.md" && echo true || echo false)"
+other_lnum=$(grep -nxF -- '- [ ] Other task' "$notes_dir/copy_placeholder.md" | cut -d: -f1)
+copied_plain_lnum=$(grep -nF -- '- [ ] Plain task' "$notes_dir/copy_placeholder.md" | tail -1 | cut -d: -f1)
+check "notes_copy_task_to_today: the replacement keeps the placeholder's position" \
+	"$([ "$copied_plain_lnum" -lt "$other_lnum" ] && echo true || echo false)"
 
 printf '\n%d / %d checks passed\n' "$pass" "$((pass + fail))"
 if [ "$fail" -ne 0 ]; then

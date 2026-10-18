@@ -2,19 +2,22 @@
 --- MCP tool: notes_update — update an existing note's content and/or
 --- frontmatter fields (title, tags, summary, date, custom fields). Only the
 --- fields provided are changed; omitted fields are preserved.
+---
+--- Pass `expected_hash` (from notes_read) to make the write conditional: if
+--- somebody else changed the file in the meantime, the update is refused
+--- instead of overwriting their edit.
 
 local shared = require("notes.mcp.shared")
 local encode_json, encode_checked = shared.encode_json, shared.encode_checked
-local resolve_path = shared.resolve_path
 
 local function handler(args)
 	if not args.path or args.path == "" then
 		return encode_checked(encode_json({ error = "path is required" }))
 	end
 
-	local abs_path = resolve_path(args.path)
-	if vim.fn.filereadable(abs_path) ~= 1 then
-		return encode_checked(encode_json({ error = "note not found: " .. args.path }))
+	local abs_path, lookup_error = shared.resolve_note_or_error(args.path)
+	if not abs_path then
+		return encode_checked(encode_json(lookup_error))
 	end
 
 	-- Which fields does the caller want to change?
@@ -31,20 +34,26 @@ local function handler(args)
 		}))
 	end
 
-	-- Read existing note (metadata + body)
+	-- Read once: the hash we check must describe exactly the content we rewrite.
+	local content = shared.read_content(abs_path)
+	if not content then
+		return encode_checked(encode_json({ error = "failed to read note: " .. abs_path }))
+	end
+	local current_hash = shared.hash_content(content)
+	if not shared.hash_matches(args.expected_hash, current_hash) then
+		return encode_checked(encode_json(shared.stale_note_error(abs_path, args.expected_hash, current_hash)))
+	end
+
+	-- Parse the content we just read (metadata + body)
 	local metadata, body
 	local ok_parse, parser_mod = pcall(require, "notes.parser")
 	if ok_parse then
-		metadata, body = parser_mod.read_file(abs_path)
+		metadata, body = parser_mod.parse(content, abs_path)
 	end
 
 	if not metadata then
 		-- Fallback: minimal parse so we never clobber a file blindly
-		local f = io.open(abs_path, "r")
-		if f then
-			body = f:read("*all")
-			f:close()
-		end
+		body = content
 		metadata = {
 			title = vim.fn.fnamemodify(abs_path, ":t:r"),
 			date = "",
@@ -102,31 +111,31 @@ local function handler(args)
 		new_content = new_body
 	end
 
-	local f = io.open(abs_path, "w")
-	if not f then
+	local hash = shared.write_content(abs_path, new_content)
+	if not hash then
 		return encode_checked(encode_json({ error = "failed to write note: " .. abs_path }))
 	end
-	f:write(new_content)
-	f:close()
 
 	return encode_checked(encode_json({
 		success = true,
 		path = abs_path,
+		relative_path = shared.relative_path(abs_path),
 		title = metadata.title,
 		tags = metadata.tags,
 		summary = metadata.summary,
 		date = metadata.date,
 		changed = changed,
+		hash = hash,
 	}))
 end
 
 return {
 	name = "notes_update",
-	description = "Update an existing note's content and/or frontmatter fields (title, tags, summary, date, custom fields). Only the fields provided are changed; omitted fields are preserved. Path can be absolute or relative to the notes directory.",
+	description = "Update an existing note's content and/or frontmatter fields (title, tags, summary, date, custom fields). Only the fields provided are changed; omitted fields are preserved. `path` may be a full path, filename, or title. Pass `expected_hash` (from notes_read) to refuse the write if the note changed in the meantime; on conflict the result has code `stale_note` and the current hash.",
 	inputSchema = {
 		type = "object",
 		properties = {
-			path = { type = "string", description = "Path to the note (relative or absolute)" },
+			path = { type = "string", description = "Note path, filename, or title (relative or absolute)" },
 			content = {
 				type = "string",
 				description = "New body content (markdown). Replaces the note body; frontmatter is preserved.",
@@ -135,6 +144,10 @@ return {
 			tags = { type = "array", items = { type = "string" }, description = "Replaces all tags" },
 			summary = { type = "string", description = "New summary" },
 			date = { type = "string", description = "New date" },
+			expected_hash = {
+				type = "string",
+				description = "Hash returned by notes_read; rejects the update with code 'stale_note' if the file changed since then",
+			},
 			metadata = {
 				type = "array",
 				description = "Custom frontmatter fields as key/value entries (scalar values only)",
