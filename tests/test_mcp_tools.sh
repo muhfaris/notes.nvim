@@ -354,7 +354,7 @@ out=$(call '{"name":"notes_resolve_link","arguments":{"link":"[[ Example Workstr
 check "notes_resolve_link: resolves a Parent/Child link to the detail note" \
 	"$(echo "$out" | jq -e '.relative_path == "tasks/2026/10/2026-10-05-tag-status.md" and .match != null' >/dev/null && echo true || echo false)"
 
-out=$(call '{"name":"notes_resolve_link","arguments":{"link":"[[ Example Workstream/No Such Task ]]"}}')
+out=$(call '{"name":"notes_resolve_link","arguments":{"link":"[[ Example Workstream/Tag status w2x ]]"}}')
 check "notes_resolve_link: an unresolved link returns suggestions" \
 	"$(echo "$out" | jq -e '.error != null and (.suggestions | length) > 0' >/dev/null && echo true || echo false)"
 
