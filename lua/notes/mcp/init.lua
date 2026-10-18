@@ -78,6 +78,7 @@ local TOOL_MODULES = {
 	"notes.mcp.tools.copy_task",
 	"notes.mcp.tools.append_info",
 	"notes.mcp.tools.resolve_link",
+	"notes.mcp.tools.export_html",
 	"notes.mcp.tools.add_subtask",
 	"notes.mcp.tools.board_status",
 	"notes.mcp.tools.rollover_tasks",

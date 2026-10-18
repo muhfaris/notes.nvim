@@ -9,5 +9,8 @@ scratch/
 plans/
 lua/notes/home_prototype.lua
 
+# Generated HTML exports
+.exports/
+
 # Logs
 *.log

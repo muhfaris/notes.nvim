@@ -677,6 +677,47 @@ copied_plain_lnum=$(grep -nF -- '- [ ] Plain task' "$notes_dir/copy_placeholder.
 check "notes_copy_task_to_today: the replacement keeps the placeholder's position" \
 	"$([ "$copied_plain_lnum" -lt "$other_lnum" ] && echo true || echo false)"
 
+# ── notes_export_html ─────────────────────────────────────────────────────
+
+cat >"$notes_dir/export-probe.md" <<'EOF'
+---
+title: "Export Probe"
+date: "2026-10-18 12:00:00"
+tags: ["probe"]
+summary: ""
+---
+# Export Probe
+
+- [ ] task one
+- [x] task two
+
+See [[ Example Workstream/Tag status w2 ]].
+
+<script>alert(1)</script>
+EOF
+
+out=$(call '{"name":"notes_export_html","arguments":{"path":"export-probe.md","output":"exports/export-probe.html"}}')
+export_path=$(echo "$out" | jq -r '.path')
+check "notes_export_html: writes a standalone HTML file and returns a file URL" \
+	"$(echo "$out" | jq -e '.success == true and (.engine == "pandoc" or .engine == "builtin") and (.url | startswith("file://"))' >/dev/null && [ -f "$export_path" ] && echo true || echo false)"
+check "notes_export_html: renders headings and checklist text" \
+	"$(grep -q '<h1' "$export_path" && grep -q 'task one' "$export_path" && echo true || echo false)"
+check "notes_export_html: renders wiki-links as labels" \
+	"$(grep -q 'wikilink' "$export_path" && grep -q 'Tag status w2' "$export_path" && echo true || echo false)"
+check "notes_export_html: raw HTML in the note is escaped" \
+	"$(! grep -q '<script>alert' "$export_path" && grep -q '&lt;script&gt;' "$export_path" && echo true || echo false)"
+
+# Force the no-pandoc path so the built-in renderer is covered too.
+out=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notes_export_html","arguments":{"path":"export-probe.md","output":"exports/export-probe-builtin.html"}}}' |
+	NOTES_DIR="$notes_dir" XDG_STATE_HOME="$state_dir" nvim --clean --headless -i NONE \
+		--cmd "set runtimepath+=$repo_dir" \
+		-c "lua vim.fn.executable = function(_) return 0 end" \
+		-c "lua require('notes.mcp').start()" 2>"$stderr_file" |
+	jq -r '.result.content[0].text')
+builtin_path=$(echo "$out" | jq -r '.path')
+check "notes_export_html: built-in fallback renders without pandoc" \
+	"$(echo "$out" | jq -e '.success == true and .engine == "builtin"' >/dev/null && grep -q '<h1' "$builtin_path" && grep -q 'task one' "$builtin_path" && grep -q 'wikilink' "$builtin_path" && echo true || echo false)"
+
 printf '\n%d / %d checks passed\n' "$pass" "$((pass + fail))"
 if [ "$fail" -ne 0 ]; then
 	exit 1
