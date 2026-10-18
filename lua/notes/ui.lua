@@ -545,6 +545,11 @@ M.new_note = function(title)
 					end)
 					folder_option = nil
 				end
+				-- %YEAR% and %MONTH% expand to the current date parts so
+				-- templates can bucket notes into time-based folders
+				-- (e.g. documents/%OPTIONS%/%YEAR%-%MONTH%/weekly).
+				configured_directory = configured_directory:gsub("%%YEAR%%", os.date("%%Y"))
+				configured_directory = configured_directory:gsub("%%MONTH%%", os.date("%%m"))
 				dir_path = dir_path .. "/" .. configured_directory
 			end
 			if folder_option then

@@ -20,20 +20,34 @@ local function ensure_highlights()
 	hl(0, "NotesHomeHeadPinned", { fg = "#e0af68", bold = true })
 	hl(0, "NotesHomeHeadRecent", { fg = "#7aa2f7", bold = true })
 	hl(0, "NotesHomeHeadTasks", { fg = "#9ece6a", bold = true })
+	hl(0, "NotesHomeHeadWaiting", { fg = "#ff9e64", bold = true })
+	hl(0, "NotesHomeHeadWeek", { fg = "#9ece6a", bold = true })
 	hl(0, "NotesHomeHeadActions", { fg = "#bb9af7", bold = true })
 	hl(0, "NotesHomeRecentBody", { fg = "#9aa5ce" })
 	hl(0, "NotesHomePinnedBody", { fg = "#e0af68" })
 	hl(0, "NotesHomeTaskBody", { fg = "#c0caf5" })
 	hl(0, "NotesHomeDoingBody", { fg = "#7dcfff" })
+	hl(0, "NotesHomeWaitingBody", { fg = "#ff9e64" })
 	hl(0, "NotesHomeAskBody", { fg = "#bb9af7" })
 	hl(0, "NotesHomeMuted", { fg = "#565f89" })
+	hl(0, "NotesHomeScope", { fg = "#565f89" })
 	hl(0, "NotesHomeGroupHeader", { fg = "#7aa2f7", italic = true })
 end
 
 -- ── Section builders ─────────────────────────────────────────────────
+-- Every builder returns `lines` plus `meta`, a map from 1-based local line
+-- index to { hl = <highlight group>, action = <what <CR> opens> } — `action`
+-- entries are exactly the shape vim.g.notes_home_actions carries. render()
+-- offsets both into absolute line numbers, so a section is never recognised
+-- again by re-matching its own rendered text: that match broke once two
+-- sections shared a glyph, and would have broken again telling a `⏳ Waiting`
+-- lane header apart from a `⏳` card.
 
-local function section_header(title)
-	return { "", "   " .. title, "   " .. string.rep("─", 46) }
+local function section_header(lines, meta, title, hl)
+	table.insert(lines, "")
+	table.insert(lines, "   " .. title)
+	table.insert(lines, "   " .. string.rep("─", 46))
+	meta[#lines - 1] = { hl = hl }
 end
 
 local function is_truthy(v)
@@ -41,56 +55,235 @@ local function is_truthy(v)
 	return v == "true" or v == "1" or v == "yes"
 end
 
-local function build_pinned_section()
-	local lines = section_header("📌 Pinned")
-
-	local config = require("notes.config").get_config()
-	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
-	if notes_dir == "" then
-		table.insert(lines, "   (no notes directory configured)")
-		return lines, {}
+local function truncate(text, width)
+	if #text <= width then
+		return text
 	end
+	return text:sub(1, width - 1) .. "…"
+end
 
-	local files = vim.fn.globpath(notes_dir, "**/*.md", false, true)
-	local pinned = {}
-	for _, note_path in ipairs(files) do
-		if vim.fn.filereadable(note_path) == 1 then
-			local rel_path = note_path:sub(#notes_dir + 2):gsub("\\", "/")
-			if rel_path:sub(1, 10) ~= "templates/" then
-				local metadata = require("notes.parser").read_file(note_path)
-				if metadata and is_truthy(metadata.pinned) then
-					table.insert(pinned, {
-						path = note_path,
-						title = (metadata.title ~= "" and metadata.title) or vim.fn.fnamemodify(note_path, ":t:r"),
-						date = metadata.date or "",
-						tags = metadata.tags or {},
-					})
+--- "3h ago" for a file mtime. A pinned card exists to be *current*, so it
+--- states how long since the board it summarises was touched.
+local function rel_age(epoch)
+	if not epoch or epoch == 0 then
+		return "unknown"
+	end
+	local d = os.time() - epoch
+	if d < 3600 then
+		return math.max(1, math.floor(d / 60)) .. "m ago"
+	elseif d < 86400 then
+		return math.floor(d / 3600) .. "h ago"
+	end
+	return math.floor(d / 86400) .. "d ago"
+end
+
+--- Headings in a board are prose, and some carry a wikilink
+--- (`### Wednesday [[Daily Note: 2026-09-09]]`) or a typo (`### Thrusday`).
+--- Strip a trailing link for display; fall back to the raw heading when
+--- nothing survives, so the author's own label is never lost.
+local function heading_label(raw)
+	local clean = vim.trim((raw:gsub("%s*%[%[.-%]%]%s*$", "")))
+	return clean ~= "" and clean or raw
+end
+
+--- Read one board's checklist lines, each tagged with the heading it sits
+--- under, whether it is still open, and whether it is a *leaf* — an open item
+--- whose next checklist sibling is not indented deeper. Leaves are "the work
+--- I can actually do"; containers are the categories. Board order is priority
+--- order, so nothing is sorted here.
+local function board_entries(path, notes_dir)
+	local tasks = require("notes.shared.tasks")
+	local entries = {}
+	local heading = "(top)"
+	for i, line in ipairs(vim.fn.readfile(path)) do
+		local h = line:match("^#+%s+(.+)$")
+		if h then
+			heading = heading_label(h)
+		else
+			local parsed = tasks.parse_task_line(line)
+			if parsed then
+				table.insert(entries, {
+					lnum = i,
+					line = line,
+					indent = parsed.indent or "",
+					box = parsed.box,
+					status = tasks.box_status(parsed.box),
+					open = tasks.is_open_box(parsed.box),
+					text = tasks.display_task_text(parsed.rest or ""),
+					heading = heading,
+				})
+			end
+		end
+	end
+	for i, entry in ipairs(entries) do
+		local nxt = entries[i + 1]
+		entry.leaf = not (nxt and #nxt.indent > #entry.indent)
+		if entry.open then
+			entry.detail = tasks.detail_path_from_line(path, entry.line, notes_dir)
+		end
+	end
+	return entries
+end
+
+--- Pinned notes are the watchlist, newest first. With nothing pinned we fall
+--- back to the newest note under a `tasks/` path (flagged `fell_back`) rather
+--- than rendering an empty dashboard to a first-time user.
+local function collect_boards(notes_dir)
+	local pinned, fallback = {}, {}
+	for _, note_path in ipairs(vim.fn.globpath(notes_dir, "**/*.md", false, true)) do
+		local rel_path = note_path:sub(#notes_dir + 2):gsub("\\", "/")
+		if rel_path:sub(1, 10) ~= "templates/" and vim.fn.filereadable(note_path) == 1 then
+			local metadata = require("notes.parser").read_file(note_path)
+			if metadata then
+				local note = {
+					path = note_path,
+					title = (metadata.title ~= "" and metadata.title)
+						or vim.fn.fnamemodify(note_path, ":t:r"),
+					date = metadata.date or "",
+				}
+				if is_truthy(metadata.pinned) then
+					table.insert(pinned, note)
+				elseif rel_path:match("^tasks/") or rel_path:match("/tasks/") then
+					table.insert(fallback, note)
 				end
 			end
 		end
 	end
-
-	table.sort(pinned, function(a, b)
+	local by_date = function(a, b)
 		return (a.date or "") > (b.date or "")
-	end)
+	end
+	table.sort(pinned, by_date)
+	local boards, fell_back = pinned, false
+	if #boards == 0 and #fallback > 0 then
+		table.sort(fallback, by_date)
+		boards, fell_back = { fallback[1] }, true
+	end
+	for _, b in ipairs(boards) do
+		b.entries = board_entries(b.path, notes_dir)
+		b.mtime = vim.fn.getftime(b.path)
+		b.open, b.next = 0, 0
+		for _, e in ipairs(b.entries) do
+			if e.open then
+				b.open = b.open + 1
+				if e.leaf then
+					b.next = b.next + 1
+				end
+			end
+		end
+	end
+	return boards, fell_back
+end
 
-	local displayed = {}
-	for i = 1, math.min(8, #pinned) do
-		local e = pinned[i]
-		local date = (e.date or ""):sub(1, 10)
-		local tags = type(e.tags) == "table" and #e.tags > 0 and ("[" .. table.concat(e.tags, ", ") .. "]") or ""
-		table.insert(lines, string.format("   %s  %s  %s  %s", "📌", date, tags, e.title))
-		table.insert(displayed, e)
+-- ── The scope line ───────────────────────────────────────────────────
+-- States what the dashboard is scoped to, so the difference between the 26
+-- "next" items here and a vault-wide `:Notes tasks` count is never a mystery.
+local function build_scope_section(boards, fell_back)
+	local lines, meta = {}, {}
+	local open, nexts = 0, 0
+	for _, b in ipairs(boards) do
+		open = open + b.open
+		nexts = nexts + b.next
 	end
-	if #pinned == 0 then
+	local label
+	if #boards == 0 then
+		label = "no pinned notes"
+	elseif fell_back then
+		label = "1 board (nothing pinned)"
+	else
+		label = string.format("%d pinned", #boards)
+	end
+	table.insert(
+		lines,
+		string.format(
+			"   scope: %s · %d open · %d next   ·   vault-wide lives in `:Notes tasks`",
+			label,
+			open,
+			nexts
+		)
+	)
+	meta[#lines] = { hl = "NotesHomeScope" }
+	return lines, meta
+end
+
+local MAX_CARDS = 8
+local NEXT_PER_CARD = 3
+
+-- ── 📌 Pinned watchlist ────────────────────────────────────────────────
+-- Each pinned note is a *live card* — its open/next counts and how long since
+-- it was touched — followed by its next few leaves. A title-only list says
+-- nothing about state, which defeats the reason for pinning it.
+local function build_pinned_section(boards)
+	local lines, meta = {}, {}
+	section_header(lines, meta, "📌 Pinned watchlist", "NotesHomeHeadPinned")
+	if #boards == 0 then
 		table.insert(lines, "   (nothing pinned yet — add `pinned: true` to a note)")
+		meta[#lines] = { hl = "NotesHomeMuted" }
+		return lines, meta
 	end
-	return lines, displayed
+	for i = 1, math.min(MAX_CARDS, #boards) do
+		local b = boards[i]
+		table.insert(
+			lines,
+			string.format("   📌 %s   ·  %d open · %d next · updated %s", b.title, b.open, b.next, rel_age(b.mtime))
+		)
+		meta[#lines] = { hl = "NotesHomePinnedBody", action = { path = b.path } }
+		local shown = 0
+		for _, e in ipairs(b.entries) do
+			if e.open and e.leaf and shown < NEXT_PER_CARD then
+				shown = shown + 1
+				table.insert(lines, "        ▸ " .. truncate(e.text, 46))
+				meta[#lines] = {
+					hl = "NotesHomeTaskBody",
+					action = { path = e.detail or b.path, lnum = e.detail and nil or e.lnum },
+				}
+			end
+		end
+		if b.open == 0 then
+			table.insert(lines, "        · nothing open — the watchlist is clear")
+			meta[#lines] = { hl = "NotesHomeMuted" }
+		end
+	end
+	return lines, meta
+end
+
+-- ── 🗓  This Week ─────────────────────────────────────────────────────
+-- The newest board's open leaves under the board's own day headings, in board
+-- order. Reusing the author's own structure — instead of re-inventing one —
+-- is what made variant A win the prototype.
+local function build_week_section(boards)
+	local lines, meta = {}, {}
+	if #boards == 0 then
+		return lines, meta
+	end
+	local board = boards[1]
+	section_header(lines, meta, "🗓  This Week — " .. board.title, "NotesHomeHeadWeek")
+	local heading = nil
+	local shown = 0
+	for _, e in ipairs(board.entries) do
+		if e.open and e.leaf then
+			if e.heading ~= heading then
+				heading = e.heading
+				table.insert(lines, "   " .. heading)
+				meta[#lines] = { hl = "NotesHomeGroupHeader" }
+			end
+			shown = shown + 1
+			table.insert(lines, "     ▸ " .. truncate(e.text, 52))
+			meta[#lines] = {
+				hl = "NotesHomeTaskBody",
+				action = { path = e.detail or board.path, lnum = e.detail and nil or e.lnum },
+			}
+		end
+	end
+	if shown == 0 then
+		table.insert(lines, "   (nothing open this week)")
+		meta[#lines] = { hl = "NotesHomeMuted" }
+	end
+	return lines, meta
 end
 
 local function build_recent_section(recent)
-	local lines = section_header("📌 Recently Modified")
-	local displayed = {}
+	local lines, meta = {}, {}
+	section_header(lines, meta, "📌 Recently Modified", "NotesHomeHeadRecent")
 	local count = 0
 	for _, e in ipairs(recent) do
 		if count >= 8 then
@@ -106,32 +299,53 @@ local function build_recent_section(recent)
 				title = metadata.title
 			end
 			table.insert(lines, string.format("   %s  %s  %s  %s", "•", date, tags, title))
-			table.insert(displayed, e)
+			meta[#lines] = { hl = "NotesHomeRecentBody", action = { path = e.path } }
 			count = count + 1
 		end
 	end
 	if count == 0 then
 		table.insert(lines, "   (no recent notes yet — open or save one to track it)")
+		meta[#lines] = { hl = "NotesHomeMuted" }
 	end
-	return lines, displayed
+	return lines, meta
 end
 
-local BOARD_ORDER = { "doing", "todo", "ask", "misc" }
+local BOARD_ORDER = { "doing", "waiting", "todo", "ask", "misc" }
 local BOARD_LABEL = {
 	doing = "🔁 In Progress",
+	waiting = "⏳ Waiting on someone",
 	todo = "📝 Todo",
 	ask = "❓ Ask",
 	misc = "🔖 TODO / tags",
 }
-local BOARD_GLYPH = { doing = "◐", todo = "☐", ask = "ASK", misc = "◦" }
+local BOARD_GLYPH = { doing = "◐", waiting = "⏳", todo = "☐", ask = "ASK", misc = "◦" }
+local BOARD_HEAD_HL = {
+	doing = "NotesHomeHeadTasks",
+	waiting = "NotesHomeHeadWaiting",
+	todo = "NotesHomeHeadTasks",
+	ask = "NotesHomeHeadTasks",
+	misc = "NotesHomeHeadTasks",
+}
+local BOARD_BODY_HL = {
+	doing = "NotesHomeDoingBody",
+	waiting = "NotesHomeWaitingBody",
+	todo = "NotesHomeTaskBody",
+	ask = "NotesHomeAskBody",
+	misc = "NotesHomeTaskBody",
+}
 
 -- Buckets: cards (checkbox `task`s carrying status) plus type-groups for the
 -- non-checkbox inline markers so each kanban lane keeps only its own kind.
+-- `waiting` is a checklist status like doing/todo, so it is bucketed by status
+-- before the `ask` type-group: an inline `ASK:` marker is a different thing
+-- from a checklist line parked on somebody else's reply.
 local function bucket_tasks(tasks)
-	local out = { doing = {}, todo = {}, ask = {}, misc = {} }
+	local out = { doing = {}, waiting = {}, todo = {}, ask = {}, misc = {} }
 	for _, t in ipairs(tasks) do
 		if t.status == "doing" then
 			table.insert(out.doing, t)
+		elseif t.status == "waiting" then
+			table.insert(out.waiting, t)
 		elseif t.status == "todo" then
 			table.insert(out.todo, t)
 		elseif t.type == "ask" then
@@ -168,151 +382,136 @@ local function group_by_note(entries)
 	return order
 end
 
--- Draw one vertical lane block appending a header, one sub-header per source
--- note, and each note's card rows into `lines`. Each card row records its
--- absolute (local) line index in `idx_act`. Shows every entry (no cap) —
--- this is meant to answer "what's pending across the whole vault," so
--- silently truncating would hide real open work.
-local function emit_lane(lines, idx_act, title, glyph, entries)
+-- Draw one vertical lane block: a header, one sub-header per source note,
+-- and each note's card rows. Shows every entry (no cap) — a lane answers
+-- "what is still pending in the pinned boards", so silently truncating would
+-- hide real open work.
+local function emit_lane(lines, meta, lane, entries)
 	table.insert(lines, "")
-	table.insert(lines, "   " .. title .. " (" .. #entries .. ")")
+	table.insert(lines, "   " .. BOARD_LABEL[lane] .. " (" .. #entries .. ")")
+	meta[#lines] = { hl = BOARD_HEAD_HL[lane] }
 	table.insert(lines, "   " .. string.rep("─", 46))
 	if #entries == 0 then
 		table.insert(lines, "   (none)")
+		meta[#lines] = { hl = "NotesHomeMuted" }
 		return
 	end
 	for _, group in ipairs(group_by_note(entries)) do
 		table.insert(lines, "     ▸ " .. group.title)
+		meta[#lines] = { hl = "NotesHomeGroupHeader" }
 		for _, entry in ipairs(group.items) do
-			table.insert(lines, string.format("         %s  %s", glyph, entry.text))
-			idx_act[#lines] = { path = entry.path, lnum = entry.lnum, detail = entry.detail, status = entry.status }
+			table.insert(lines, string.format("         %s  %s", BOARD_GLYPH[lane], entry.text))
+			meta[#lines] = {
+				hl = BOARD_BODY_HL[lane],
+				action = {
+					path = entry.path,
+					lnum = entry.lnum,
+					detail = entry.detail,
+					status = entry.status,
+				},
+			}
 		end
 	end
 end
 
-local function build_tasks_section()
-	local lines = {}
-	local idx_act = {}
+-- Lanes, scoped to the boards the watchlist is built from. A vault-wide scan
+-- already has a home (`:Notes tasks`, the notes_tasks MCP tool), and a lane
+-- that mixes detail-note prose into Todo cannot answer "what is still
+-- pending" — which is what this dashboard exists for.
+local function build_tasks_section(notes_dir, boards)
+	local lines, meta = {}, {}
 
-	local config = require("notes.config").get_config()
-	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
-	local tasks = require("notes.shared.tasks").scan(notes_dir)
-	local buckets = bucket_tasks(tasks)
-	if #tasks == 0 then
-		for _, l in ipairs(section_header("📝 Open Tasks & TODOs")) do
-			table.insert(lines, l)
+	local board_paths = {}
+	for _, b in ipairs(boards) do
+		board_paths[b.path] = true
+	end
+
+	local scoped = {}
+	for _, t in ipairs(require("notes.shared.tasks").scan(notes_dir)) do
+		if board_paths[t.path] then
+			table.insert(scoped, t)
 		end
-		table.insert(lines, "   (no open tasks 🎉)")
-		return lines, idx_act
 	end
 
-	for _, lane in ipairs(BOARD_ORDER) do
-		emit_lane(lines, idx_act, BOARD_LABEL[lane], BOARD_GLYPH[lane], buckets[lane])
+	if #scoped == 0 then
+		section_header(lines, meta, "📝 Open Tasks & TODOs", "NotesHomeHeadTasks")
+		table.insert(lines, "   (no open tasks in the pinned boards 🎉)")
+		meta[#lines] = { hl = "NotesHomeMuted" }
+		return lines, meta
 	end
-	return lines, idx_act
+
+	local buckets = bucket_tasks(scoped)
+	for _, lane in ipairs(BOARD_ORDER) do
+		emit_lane(lines, meta, lane, buckets[lane])
+	end
+	return lines, meta
 end
 
 -- ── Render ────────────────────────────────────────────────────────────
 
 function M.render(buf)
-	local recent_lines, recent_entries = build_recent_section(require("notes.recent").read())
-	local lines = {}
+	local config = require("notes.config").get_config()
+	local notes_dir = vim.fn.expand(config.notes_dir):gsub("/+$", "")
+
+	local lines, meta = {}, {}
+	local hl_by_line = {}
 	local action_map = {}
 
-	lines[#lines + 1] = "   " .. string.rep("─", 66)
-	lines[#lines + 1] = "   📚  Notes Home"
-	lines[#lines + 1] = "   " .. string.rep("─", 66)
-
-	local pinned_lines, pinned_entries = build_pinned_section()
-	for _, l in ipairs(pinned_lines) do
-		lines[#lines + 1] = l
-	end
-
-	for _, l in ipairs(recent_lines) do
-		lines[#lines + 1] = l
-	end
-
-	local task_lines, task_idx_act = build_tasks_section()
-	local task_offset = #lines + 1 -- first line index of the lane block
-	for _, l in ipairs(task_lines) do
-		lines[#lines + 1] = l
-	end
-	for li, a in pairs(task_idx_act) do
-		action_map[tostring(task_offset + li - 1)] = a
-	end
-
-	-- Record absolute line numbers so <CR> can open the note for pinned and
-	-- recent rows (task/lane rows were already merged from task_idx_act above).
-	local in_pinned = false
-	local in_recent = false
-	local pinned_idx = 0
-	local recent_idx = 0
-	local PINNED_HEADER = "📌 Pinned"
-	for idx, l in ipairs(lines) do
-		if l:match("📌 Pinned$") then
-			in_pinned = true
-			in_recent = false
-		elseif l:match("📌 Recently Modified") then
-			in_pinned = false
-			in_recent = true
-		elseif l:match("🔁 In Progress") or l:match("📝 Todo") or l:match("❓ Ask") or l:match("🔖 TODO") or l:match("🚀 Quick Actions") then
-			in_pinned = false
-			in_recent = false
+	-- Merge a section's local meta into absolute line numbers; `action` keys are
+	-- the line numbers <CR> and the p/x/b/w keys look up.
+	local function append(section_lines, section_meta)
+		local offset = #lines
+		for _, l in ipairs(section_lines) do
+			table.insert(lines, l)
 		end
-
-		if in_pinned and l ~= "   " .. PINNED_HEADER and l:match("^%s+📌%s") then
-			pinned_idx = pinned_idx + 1
-			local e = pinned_entries[pinned_idx]
-			if e and e.path then
-				action_map[tostring(idx)] = { path = e.path }
+		for li, m in pairs(section_meta or {}) do
+			local abs = offset + li
+			if m.action then
+				action_map[tostring(abs)] = m.action
 			end
-		elseif in_recent and l:match("^%s+•%s") then
-			recent_idx = recent_idx + 1
-			local e = recent_entries[recent_idx]
-			if e and e.path then
-				action_map[tostring(idx)] = { path = e.path }
+			if m.hl then
+				hl_by_line[abs] = m.hl
 			end
 		end
 	end
 
-	lines[#lines + 1] = ""
-	lines[#lines + 1] = "   🚀 Quick Actions"
-	lines[#lines + 1] = "   " .. string.rep("─", 46)
-	lines[#lines + 1] = "   [n] new   [d] daily   [s] search   [r] refresh   [t] tasks   [q] close"
+	local function bare(text, hl)
+		table.insert(lines, text)
+		hl_by_line[#lines] = hl
+	end
+
+	bare("   " .. string.rep("─", 66), "NotesHomeSep")
+	bare("   📚  Notes Home", "NotesHomeTitle")
+	bare("   " .. string.rep("─", 66), "NotesHomeSep")
+
+	local boards, fell_back = {}, false
+	if notes_dir ~= "" then
+		boards, fell_back = collect_boards(notes_dir)
+	end
+
+	append(build_scope_section(boards, fell_back))
+	append(build_pinned_section(boards))
+	append(build_week_section(boards))
+	append(build_recent_section(require("notes.recent").read()))
+	if notes_dir ~= "" then
+		append(build_tasks_section(notes_dir, boards))
+	end
+
+	bare("", "NotesHomeSep")
+	bare("   🚀 Quick Actions", "NotesHomeHeadActions")
+	bare("   " .. string.rep("─", 46), "NotesHomeSep")
+	bare("   [n] new   [d] daily   [s] search   [r] refresh   [t] tasks", "NotesHomeMuted")
+	bare("   [p] promote   [w] waiting   [x] done   [b] back to todo   [q] close", "NotesHomeMuted")
 
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.g.notes_home_actions = vim.json.encode(action_map) or "{}"
 
-	-- Apply per-line highlights.
+	-- Apply per-line highlights from the same meta the sections built.
 	ensure_highlights()
 	local ns = vim.api.nvim_create_namespace("notes_home")
 	vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-	for i, l in ipairs(lines) do
-		local g = "NotesHomeMuted"
-		if i == 2 then
-			g = "NotesHomeTitle"
-		elseif l:match("^%s*📌 Pinned") then
-			g = "NotesHomeHeadPinned"
-		elseif l:match("📌 Recently Modified") then
-			g = "NotesHomeHeadRecent"
-		elseif l:match("🔁 In Progress") or l:match("📝 Todo") or l:match("❓ Ask") or l:match("🔖 TODO") or l:match("📝 Open Tasks") or l:match("no open tasks") then
-			g = "NotesHomeHeadTasks"
-		elseif l:match("🚀 Quick Actions") then
-			g = "NotesHomeHeadActions"
-		elseif l:match("^%s+◐%s") then
-			g = "NotesHomeDoingBody"
-		elseif l:match("^%s+ASK%s") then
-			g = "NotesHomeAskBody"
-		elseif l:match("^%s+[☐◦]%s") then
-			g = "NotesHomeTaskBody"
-		elseif l:match("^%s+▸%s") then
-			g = "NotesHomeGroupHeader"
-		elseif l:match("^%s+📌%s") then
-			g = "NotesHomePinnedBody"
-		elseif l:match("^%s+•%s") then
-			g = "NotesHomeRecentBody"
-		end
-		vim.api.nvim_buf_add_highlight(buf, ns, g, i - 1, 0, -1)
+	for i = 1, #lines do
+		vim.api.nvim_buf_add_highlight(buf, ns, hl_by_line[i] or "NotesHomeMuted", i - 1, 0, -1)
 	end
 end
 
@@ -438,8 +637,8 @@ function M.open()
 	-- Rewrite the checkbox box on the target note line: if the markdown buffer is
 	-- already open we edit it in place and save it (so unsaved edits aren't lost),
 	-- otherwise we read/modify/write the file on disk. `status` is the target
-	-- state name ("todo"/"doing"/"done"); the glyph it writes comes from
-	-- notes.shared.tasks.status_box, so `x` cannot mean one thing here and
+	-- state name ("todo"/"doing"/"waiting"/"done"); the glyph it writes comes
+	-- from notes.shared.tasks.status_box, so `x` cannot mean one thing here and
 	-- another in the MCP tool.
 	local function persist_card(status)
 		local box = tasks_shared.status_box(status)
@@ -504,13 +703,20 @@ function M.open()
 		end
 		return false
 	end
-	-- Movement keys act on the todo/doing lanes only, and name the *target
-	-- status* rather than a glyph: p promotes todo, x finishes doing, b sends it
-	-- back to todo. The written box comes from the shared grammar.
+	-- Movement keys act on cards, and name the *target status* rather than a
+	-- glyph: p promotes todo, w parks it on somebody else's reply, x finishes
+	-- doing, b sends it back to todo. The written box comes from the shared
+	-- grammar. `b` also accepts a waiting card, so waiting is never a dead end.
 	vim.keymap.set("n", "p", function()
 		local e = hovered_card()
 		if e and e.status == "todo" then
 			persist_card("doing")
+		end
+	end, opts)
+	vim.keymap.set("n", "w", function()
+		local e = hovered_card()
+		if e and (e.status == "todo" or e.status == "doing") then
+			persist_card("waiting")
 		end
 	end, opts)
 	vim.keymap.set("n", "x", function()
@@ -521,7 +727,7 @@ function M.open()
 	end, opts)
 	vim.keymap.set("n", "b", function()
 		local e = hovered_card()
-		if e and e.status == "doing" then
+		if e and (e.status == "doing" or e.status == "waiting") then
 			persist_card("todo")
 		end
 	end, opts)
