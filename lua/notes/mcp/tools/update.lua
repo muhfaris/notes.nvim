@@ -22,7 +22,7 @@ local function handler(args)
 
 	-- Which fields does the caller want to change?
 	local changed = {}
-	local updatable = { "title", "tags", "summary", "date", "metadata", "content" }
+	local updatable = { "title", "tags", "summary", "date", "metadata", "content", "append", "prepend" }
 	for _, field in ipairs(updatable) do
 		if args[field] ~= nil then
 			table.insert(changed, field)
@@ -30,7 +30,7 @@ local function handler(args)
 	end
 	if #changed == 0 then
 		return encode_checked(encode_json({
-			error = "nothing to update: provide at least one of content, title, tags, summary, date, metadata",
+			error = "nothing to update: provide at least one of content, append, prepend, title, tags, summary, date, metadata",
 		}))
 	end
 
@@ -99,9 +99,18 @@ local function handler(args)
 	end
 
 	-- Build new file content
+	if args.content ~= nil and (args.append ~= nil or args.prepend ~= nil) then
+		return encode_checked(encode_json({ error = "content replaces the body; do not combine it with append/prepend" }))
+	end
 	local new_body = body or ""
 	if args.content ~= nil then
 		new_body = args.content
+	end
+	if args.prepend ~= nil then
+		new_body = tostring(args.prepend):gsub("\n+$", "") .. "\n" .. new_body
+	end
+	if args.append ~= nil then
+		new_body = new_body:gsub("\n+$", "") .. "\n" .. tostring(args.append):gsub("\n+$", "") .. "\n"
 	end
 
 	local new_content
@@ -131,7 +140,7 @@ end
 
 return {
 	name = "notes_update",
-	description = "Update an existing note's content and/or frontmatter fields (title, tags, summary, date, custom fields). Only the fields provided are changed; omitted fields are preserved. `path` may be a full path, filename, or title. Pass `expected_hash` (from notes_read) to refuse the write if the note changed in the meantime; on conflict the result has code `stale_note` and the current hash.",
+	description = "Update an existing note: replace the body (`content`), add to it (`append`/`prepend`), and/or change frontmatter (`title`, `tags`, `summary`, `date`, `metadata`). Only provided, non-null fields change; null or omitted fields are preserved, so for a frontmatter-only edit send just those fields. To add text to the end of a note use `append`, NOT `content` (which replaces the whole body). `path` may be a full path, filename, or title. Pass `expected_hash` (from notes_read or notes_get_metadata) to refuse the write if the note changed in the meantime; on conflict the result has code `stale_note` and the current hash.",
 	inputSchema = {
 		type = "object",
 		properties = {
@@ -143,6 +152,8 @@ return {
 			title = { type = "string", description = "New title in frontmatter (filename is unchanged)" },
 			tags = { type = "array", items = { type = "string" }, description = "Replaces all tags" },
 			summary = { type = "string", description = "New summary" },
+			append = { type = "string", description = "Text appended to the end of the body; existing body is kept. Not combinable with `content`" },
+			prepend = { type = "string", description = "Text inserted at the start of the body (after frontmatter); existing body is kept. Not combinable with `content`" },
 			date = { type = "string", description = "New date" },
 			expected_hash = {
 				type = "string",

@@ -29,7 +29,7 @@ end
 
 return {
 	name = "notes_get_metadata",
-	description = "Get a note's YAML frontmatter metadata (title, date, tags, summary, and custom fields such as `parent`/`source_note`). `path` may be a full path, filename, or title.",
+	description = "Get a note's YAML frontmatter metadata (title, date, tags, summary, and custom fields such as `parent`/`source_note`) plus its content `hash`, without returning the body. Use the `hash` as `expected_hash` for writers. `path` may be a full path, filename, or title.",
 	inputSchema = {
 		type = "object",
 		properties = {

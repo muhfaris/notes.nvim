@@ -94,9 +94,14 @@ local function handler(args)
 		return encode_checked(encode_json({ error = "title is required" }))
 	end
 
-	local sanitized = slugify(title)
+	-- `filename` overrides the title-derived filename stem; the title is unchanged.
+	local stem_source = title
+	if args.filename and vim.trim(args.filename) ~= "" then
+		stem_source = (vim.trim(args.filename):gsub("%.md$", ""))
+	end
+	local sanitized = slugify(stem_source)
 	if sanitized == "" then
-		return encode_checked(encode_json({ error = "title has no usable filename characters" }))
+		return encode_checked(encode_json({ error = "title or filename has no usable filename characters" }))
 	end
 
 	local date = vim.trim(args.date or "")
@@ -300,6 +305,8 @@ local function handler(args)
 			out.board_line = board_result.line
 			out.board_hash = board_result.hash
 		else
+			out.success = false
+			out.note_created = true
 			out.board_error = board_error and board_error.error or "failed to add the board line"
 			out.board_error_detail = board_error
 		end
@@ -315,6 +322,7 @@ return {
 		type = "object",
 		properties = {
 			title = { type = "string", description = "Note title (used for filename, frontmatter, and board link)" },
+			filename = { type = "string", description = "Optional filename stem (with or without .md) instead of one derived from the title; the title in frontmatter is unchanged" },
 			content = { type = "string", description = "Optional body content (markdown), used verbatim; template frontmatter is retained but its body skeleton is not" },
 			tags = { type = "array", items = { type = "string" }, description = "Optional list of tags" },
 			directory = {

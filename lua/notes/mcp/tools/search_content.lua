@@ -73,16 +73,43 @@ local function handler(args)
 		end
 	end
 
+	local limit = tonumber(args.limit) or 50
+	local max_chars = tonumber(args.max_line_chars) or 240
+	if args.files_only then
+		local seen, files = {}, {}
+		for _, r in ipairs(results) do
+			if not seen[r.path] then
+				seen[r.path] = true
+				table.insert(files, { path = r.path, relative_path = r.relative_path })
+			end
+		end
+		results = files
+	else
+		for _, r in ipairs(results) do
+			if #r.text > max_chars then
+				r.text = r.text:sub(1, max_chars) .. "…"
+			end
+		end
+	end
+	if #results > limit then
+		local total = #results
+		results = vim.list_slice(results, 1, limit)
+		table.insert(results, { truncated = true, total = total, shown = limit })
+	end
+
 	return encode_checked(encode_json(results))
 end
 
 return {
 	name = "notes_search_content",
-	description = "Full-text search inside note content. Uses ripgrep if available, otherwise falls back to Lua search.",
+	description = "Full-text search inside note BODIES, one result per matching line (use notes_search to find a note by title/tag). Output can be large: use `files_only=true` to get only matching paths, `limit` (default 50) to cap results, and `max_line_chars` (default 240) to shorten lines. A trailing {truncated,total,shown} entry means results were cut. Uses ripgrep if available, otherwise a Lua search.",
 	inputSchema = {
 		type = "object",
 		properties = {
 			query = { type = "string", description = "Text to search for in note content" },
+			limit = { type = "number", description = "Max results (default 50); a trailing {truncated,total,shown} entry marks cut-off output" },
+			max_line_chars = { type = "number", description = "Truncate each matched line to this many characters (default 240)" },
+			files_only = { type = "boolean", description = "Return only distinct matching files, not lines" },
 		},
 		required = { "query" },
 	},

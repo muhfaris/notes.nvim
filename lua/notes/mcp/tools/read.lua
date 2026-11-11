@@ -42,7 +42,7 @@ end
 
 return {
 	name = "notes_read",
-	description = "Read a note's full content and metadata. `path` may be a full path, a bare filename (`w2-oct-2026.md`), or a title (`Weekly: w2 oct 2026`) — it is resolved across the vault, and a miss returns `suggestions` with similar paths. The returned `hash` can be passed to writers as `expected_hash` to reject a write when the file changed after this read.",
+	description = "Read a note's FULL content and metadata. `path` may be a full path, a bare filename (`w2-oct-2026.md`), or a title (`Weekly: w2 oct 2026`); it is resolved across the vault, and a miss returns `suggestions` with similar paths. Only need the `hash` or frontmatter? Use notes_get_metadata (no body, much smaller). The returned `hash` can be passed to writers as `expected_hash`.",
 	inputSchema = {
 		type = "object",
 		properties = {

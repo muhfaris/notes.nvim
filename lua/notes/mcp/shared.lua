@@ -731,6 +731,14 @@ M.insert_task = function(lines, opts)
 			match = opts.parent_match,
 			link = opts.parent_link,
 		})
+		if hits and #hits == 0 and opts.heading and opts.heading ~= "" and not opts.parent_lnum then
+			-- The parent may live under another heading (e.g. a prior day);
+			-- retry across the whole note. Still must resolve uniquely below.
+			hits, err = M.find_task_lines(lines, {
+				match = opts.parent_match,
+				link = opts.parent_link,
+			})
+		end
 		if not hits then
 			return nil, err
 		end

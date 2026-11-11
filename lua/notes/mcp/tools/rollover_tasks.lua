@@ -121,6 +121,7 @@ local function handler(args)
 		content = table.concat(body_lines, "\n"),
 		tags = args.tags,
 		directory = args.directory,
+		filename = args.filename,
 	}))
 	if not result or result.error then
 		return encode_checked(encode_json({ error = (result and result.error) or "failed to create new note" }))
@@ -143,6 +144,7 @@ return {
 			from_path = { type = "string", description = "Path to the previous board/weekly note to carry tasks forward from" },
 			title = { type = "string", description = "Title for the new note" },
 			directory = { type = "string", description = "Optional subdirectory under notes for the new note; defaults to notes root" },
+			filename = { type = "string", description = "Optional filename stem (with or without .md), e.g. 'w3-nov-2026'; defaults to a slug of the title" },
 			tags = { type = "array", items = { type = "string" }, description = "Optional tags for the new note" },
 		},
 		required = { "from_path", "title" },

@@ -255,6 +255,10 @@ check "notes_rollover_tasks: drops the already-done sibling child" "$(! grep -q 
 check "notes_rollover_tasks: keeps the still-open child" "$(grep -q 'open child one' "$new_path" && echo true || echo false)"
 check "notes_rollover_tasks: does not duplicate the source note's own H1 title" "$(! grep -qx '# Board' "$new_path" && echo true || echo false)"
 
+out=$(call '{"name":"notes_rollover_tasks","arguments":{"from_path":"board.md","title":"Weekly: w3 test","filename":"w3-test.md"}}')
+check "notes_rollover_tasks: filename sets the file name while the title stays" \
+	"$(echo "$out" | jq -e '.success == true and (.path | endswith("/w3-test.md")) and .title == "Weekly: w3 test"' >/dev/null && echo true || echo false)"
+
 # ── notes_history / notes_diff ───────────────────────────────────────────
 
 git_commit_all "post-fixture changes"
@@ -508,6 +512,74 @@ check "notes_create: task frontmatter carries parent and source_note" \
 	"$(grep -q 'parent: "\[\[ Category B \]\]"' "$created_path" && grep -q 'source_note: "documents/project-alpha/Y-m/weekly/w2-oct-2026.md"' "$created_path" && echo true || echo false)"
 check "notes_create: board line is inserted under the parent" \
 	"$(echo "$out" | jq -e '.board_line == "  - [ ] [[ Category B/Created Child ]]"' >/dev/null && grep -qF -- '  - [ ] [[ Category B/Created Child ]]' "$notes_dir/create_board.md" && echo true || echo false)"
+
+out=$(call '{"name":"notes_create","arguments":{"title":"Other Day Child","parent":"Category B","date":"2026-10-18","board_path":"create_board.md","heading":"Thursday"}}')
+check "notes_create: a failed board insert reports success=false with note_created=true" \
+	"$(echo "$out" | jq -e '.success == false and .note_created == true and (.board_error | length > 0)' >/dev/null && echo true || echo false)"
+
+cat >"$notes_dir/create_board2.md" <<'EOF'
+---
+title: "Create Board 2"
+date: "2026-10-18"
+tags: []
+summary: ""
+---
+# Create Board 2
+
+### Monday
+- [ ] Category C
+
+### Wednesday
+- [ ] Other
+EOF
+out=$(call '{"name":"notes_create","arguments":{"title":"Cross Day Child","parent":"Category C","date":"2026-10-18","board_path":"create_board2.md","heading":"Wednesday"}}')
+check "notes_create: a parent under another heading is found by whole-note retry" \
+	"$(echo "$out" | jq -e '.success == true and .board_line == "  - [ ] [[ Category C/Cross Day Child ]]"' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_search_content","arguments":{"query":"Category","limit":1}}')
+check "notes_search_content: limit caps results and appends a truncation marker" \
+	"$(echo "$out" | jq -e 'length == 2 and .[1].truncated == true' >/dev/null && echo true || echo false)"
+
+out=$(call '{"name":"notes_search_content","arguments":{"query":"Category","files_only":true}}')
+check "notes_search_content: files_only returns distinct paths without line text" \
+	"$(echo "$out" | jq -e 'length > 0 and all(.[]; has("path") and (has("text") | not)) and (map(.path) | length == (unique | length))' >/dev/null && echo true || echo false)"
+
+cat >"$notes_dir/needle.md" <<'EOF'
+---
+title: "Needle"
+date: "2026-09-15"
+tags: []
+summary: ""
+---
+See the project-alpha service for details.
+EOF
+
+out=$(call '{"name":"notes_search","arguments":{"query":"Needle","names_only":true}}')
+check "notes_search: names_only returns only path, relative_path, title" \
+	"$(echo "$out" | jq -e 'length >= 1 and all(.[]; (keys | sort) == ["path","relative_path","title"])' >/dev/null && echo true || echo false)"
+
+hash_before=$(call '{"name":"notes_get_metadata","arguments":{"path":"needle.md"}}' | jq -r '.hash')
+out=$(call '{"name":"notes_update","arguments":{"path":"needle.md","append":"Appended line.","expected_hash":"'"$hash_before"'"}}')
+check "notes_update: append keeps the body and adds the text at the end" \
+	"$(echo "$out" | jq -e '.success == true' >/dev/null && grep -q 'project-alpha service' "$notes_dir/needle.md" && [ "$(tail -n1 "$notes_dir/needle.md")" = "Appended line." ] && echo true || echo false)"
+out=$(call '{"name":"notes_update","arguments":{"path":"needle.md","content":"x","append":"y"}}')
+check "notes_update: content combined with append is rejected" \
+	"$(echo "$out" | jq -e '.error | test("append")' >/dev/null && echo true || echo false)"
+
+cat >"$notes_dir/dup_hit.md" <<'EOF'
+---
+title: "Zebra Crossing"
+date: "2026-09-15"
+tags: [zebra]
+summary: ""
+---
+Body.
+EOF
+out=$(call '{"name":"notes_list","arguments":{"query":"zebra"}}')
+rm -f "$notes_dir/dup_hit.md"
+check "notes_list: a note matching by title and tag is listed once" \
+	"$(echo "$out" | jq -e 'length == 1' >/dev/null && echo true || echo false)"
+rm -f "$notes_dir/needle.md"
 
 # ── copy between day sections of the same board ───────────────────────────
 

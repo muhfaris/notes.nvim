@@ -17,15 +17,17 @@ local function handler(args)
 	if query ~= "" then
 		local filtered = {}
 		for _, note in ipairs(notes) do
-			if note.title:lower():find(query, 1, true) or note.summary:lower():find(query, 1, true) then
-				table.insert(filtered, note)
-			end
-			-- Check tags
-			for _, t in ipairs(note.tags) do
-				if t:lower():find(query, 1, true) then
-					table.insert(filtered, note)
-					break
+			local hit = note.title:lower():find(query, 1, true) or note.summary:lower():find(query, 1, true)
+			if not hit then
+				for _, t in ipairs(note.tags) do
+					if t:lower():find(query, 1, true) then
+						hit = true
+						break
+					end
 				end
+			end
+			if hit then
+				table.insert(filtered, note)
 			end
 		end
 		notes = filtered
@@ -59,6 +61,18 @@ local function handler(args)
 		notes = limited
 	end
 
+	if args.names_only then
+		local names = {}
+		for _, note in ipairs(notes) do
+			names[#names + 1] = {
+				path = note.path,
+				relative_path = shared.relative_path(note.path),
+				title = note.title,
+			}
+		end
+		return encode_checked(encode_json(names))
+	end
+
 	-- Strip body from results for listing
 	local stripped = {}
 	for _, note in ipairs(notes) do
@@ -76,13 +90,14 @@ end
 
 return {
 	name = "notes_list",
-	description = "List all notes with metadata. Filters: query (title/tag/summary), tag (exact match), limit (max results).",
+	description = "List notes with metadata (path, title, date, tags, summary), newest first. Use to browse or filter by tag. To find a note by name or topic, prefer notes_search; to find text inside note bodies, use notes_search_content. `names_only=true` returns just {path, relative_path, title}.",
 	inputSchema = {
 		type = "object",
 		properties = {
 			query = { type = "string", description = "Optional search query (matches title, tags, summary)" },
 			tag = { type = "string", description = "Optional exact tag filter" },
 			limit = { type = "number", description = "Optional max results (0 = unlimited)" },
+			names_only = { type = "boolean", description = "Return only {path, relative_path, title} per note" },
 		},
 	},
 	handler = handler,
